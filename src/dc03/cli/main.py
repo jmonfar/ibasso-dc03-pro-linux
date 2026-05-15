@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import errno
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -232,6 +234,72 @@ def _cmd_forget(_args: argparse.Namespace) -> None:
     print("Device path cleared")
 
 
+def _cmd_watch(_args: argparse.Namespace, device: Path) -> None:
+    """Long-running watcher: sync hardware-button events into volume.toml.
+
+    Each `fe 01` input report carries the current L attenuation register in
+    byte 8 and the current R attenuation register in byte 9. Buttons step
+    both registers in lock-step, so:
+
+        base   = max(L, R)                  # quieter channel's attenuation
+        volume = volume_from_attenuation(base)
+        balance = L - R                     # signed; matches the protocol's
+                                            # asymmetric L/R encoding
+
+    Echo reports (marker `00 00`) are filtered out — they only carry a
+    stale cache of byte 8 from the previous `fe 01` event.
+
+    Exits cleanly when the device is disconnected (`EIO` / `ENODEV` on
+    read), or at EOF when reading from a regular file (used by tests).
+    """
+    print(f"Watching {device} for button events...", flush=True)
+    fd = os.open(str(device), os.O_RDONLY)
+    try:
+        while True:
+            try:
+                report = os.read(fd, protocol.INPUT_REPORT_SIZE)
+            except OSError as e:
+                if e.errno in (errno.EIO, errno.ENODEV):
+                    print("Device disconnected; exiting cleanly", flush=True)
+                    return
+                raise
+            if not report:
+                return  # EOF (test path)
+            if len(report) < protocol.INPUT_REPORT_SIZE:
+                continue
+
+            if bytes(report[4:6]) != protocol.MARKER_BUTTON_EVENT:
+                continue
+
+            left = report[8]
+            right = report[9]
+            base = max(left, right)
+            volume = protocol.volume_from_attenuation(base)
+            if volume is None:
+                print(
+                    f"dc03 watch: unrecognized attenuation byte 0x{base:02x}; "
+                    "skipping",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                continue
+
+            balance = left - right
+            save_volume(
+                VolumeSettings(
+                    volume=volume,
+                    balance=balance,
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+            print(
+                f"Button event → volume={volume}, balance={balance}",
+                flush=True,
+            )
+    finally:
+        os.close(fd)
+
+
 # ---- Parser & entry point ----
 
 
@@ -276,6 +344,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "restore", help="replay stored settings to the device (udev-fired)"
     )
     sub.add_parser(
+        "watch",
+        help="long-running input-report watcher (udev-fired); "
+        "syncs hardware-button volume changes into volume.toml",
+    )
+    sub.add_parser(
         "forget", help="manually clear the stored device path"
     )
 
@@ -300,6 +373,7 @@ def main(argv: list[str] | None = None) -> int:
             "output": _cmd_output,
             "balance": _cmd_balance,
             "restore": _cmd_restore,
+            "watch": _cmd_watch,
         }
         dispatch[args.command](args, device)
         return 0

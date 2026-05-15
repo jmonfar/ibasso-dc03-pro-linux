@@ -365,3 +365,120 @@ def test_balance_out_of_ui_range_argparse_exits(isolated):
     with pytest.raises(SystemExit) as exc:
         main(["--device", str(dev), "balance", "100"])
     assert exc.value.code == 2
+
+
+# ---- watch ----
+
+
+def _fe01_report(left: int, right: int) -> bytes:
+    """Build a 32-byte `fe 01` input report with given L and R bytes."""
+    r = bytearray(32)
+    r[4:6] = b"\xfe\x01"
+    r[8] = left
+    r[9] = right
+    return bytes(r)
+
+
+def _echo_report(seq: int, left_cache: int = 0, right_cache: int = 0) -> bytes:
+    """Build a 32-byte `00 00` echo report with given seq + stale-cache bytes."""
+    r = bytearray(32)
+    # marker bytes 4:6 already 00 00
+    r[6] = seq & 0xFF
+    r[7] = (seq >> 8) & 0xFF
+    r[8] = left_cache
+    r[9] = right_cache
+    return bytes(r)
+
+
+def test_watch_records_button_event(isolated):
+    """A single fe 01 report updates volume + balance in volume.toml."""
+    tmp_path, _ = isolated
+    dev = _make_valid_hidraw(tmp_path)
+    # L=0x31 (49 → index 51), R=0x1D (29 → balance = 0x14 = 20)
+    dev.write_bytes(_fe01_report(0x31, 0x1D))
+
+    assert main(["--device", str(dev), "watch"]) == 0
+
+    loaded = load_volume()
+    assert loaded.volume == 51
+    assert loaded.balance == 20
+
+
+def test_watch_ignores_echo_reports(isolated):
+    """Echo reports (marker 00 00) don't modify volume.toml."""
+    tmp_path, _ = isolated
+    dev = _make_valid_hidraw(tmp_path)
+    save_volume(VolumeSettings(volume=75, balance=10))
+    dev.write_bytes(_echo_report(seq=0x01, left_cache=0xFF, right_cache=0xFF))
+
+    assert main(["--device", str(dev), "watch"]) == 0
+
+    loaded = load_volume()
+    assert loaded.volume == 75
+    assert loaded.balance == 10
+
+
+def test_watch_processes_multiple_events_progressively(isolated):
+    """Multiple fe 01 reports leave volume.toml at the last event's state."""
+    tmp_path, _ = isolated
+    dev = _make_valid_hidraw(tmp_path)
+    dev.write_bytes(
+        _fe01_report(0x32, 0x1E)   # volume 50, balance 20
+        + _fe01_report(0x31, 0x1D)  # volume 51, balance preserved
+        + _fe01_report(0x30, 0x1C)  # volume 52, balance preserved
+    )
+
+    main(["--device", str(dev), "watch"])
+
+    loaded = load_volume()
+    assert loaded.volume == 52
+    assert loaded.balance == 20
+
+
+def test_watch_writes_balance_zero_when_channels_equal(isolated):
+    """L == R produces balance = 0 in the saved config."""
+    tmp_path, _ = isolated
+    dev = _make_valid_hidraw(tmp_path)
+    dev.write_bytes(_fe01_report(0x32, 0x32))  # volume 50, balance 0
+
+    main(["--device", str(dev), "watch"])
+
+    loaded = load_volume()
+    assert loaded.volume == 50
+    assert loaded.balance == 0
+
+
+def test_watch_skips_unrecognized_attenuation(isolated, capsys):
+    """An attenuation value not in VOLUME_STEPS logs a warning and skips."""
+    tmp_path, _ = isolated
+    dev = _make_valid_hidraw(tmp_path)
+    save_volume(VolumeSettings(volume=75, balance=0))
+    # 0xFC is in a 5-unit gap region; not in VOLUME_STEPS
+    dev.write_bytes(_fe01_report(0xFC, 0xFC))
+
+    assert main(["--device", str(dev), "watch"]) == 0
+
+    err = capsys.readouterr().err
+    assert "0xfc" in err.lower()
+    loaded = load_volume()
+    assert loaded.volume == 75  # unchanged
+    assert loaded.balance == 0
+
+
+def test_watch_mixed_stream_only_acts_on_fe01(isolated):
+    """A stream of echo + fe01 + echo only updates from the fe01."""
+    tmp_path, _ = isolated
+    dev = _make_valid_hidraw(tmp_path)
+    dev.write_bytes(
+        _echo_report(seq=0x01)
+        + _fe01_report(0x32, 0x32)   # volume 50, balance 0
+        + _echo_report(seq=0x02)
+        + _fe01_report(0x31, 0x31)   # volume 51, balance 0
+        + _echo_report(seq=0x14)
+    )
+
+    main(["--device", str(dev), "watch"])
+
+    loaded = load_volume()
+    assert loaded.volume == 51
+    assert loaded.balance == 0

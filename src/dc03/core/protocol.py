@@ -99,6 +99,10 @@ _ATTENUATION_SILENT = 0xFF
 # project (ibasso-dc03-pro-macos, MIT (c) 2026 Chandru03). Index = user-facing
 # volume 0..100; value = DAC attenuation register byte (0 = loudest,
 # 255 = silent).
+#
+# `volume_from_attenuation` below reverses the lookup; callers that read
+# byte 8 / byte 9 from an `fe 01` input report use it to recover the
+# user-facing volume index from the device's reported attenuation register.
 
 VOLUME_STEPS: tuple[int, ...] = (
     255, 155, 150, 145, 140, 135, 130, 125, 120, 115,
@@ -113,6 +117,24 @@ VOLUME_STEPS: tuple[int, ...] = (
      10,   9,   8,   7,   6,   5,   4,   3,   2,   1,
       0,
 )
+
+
+# ---- VOLUME_STEPS reverse lookup ----
+
+
+def volume_from_attenuation(value: int) -> int | None:
+    """Return the `VOLUME_STEPS` index for an attenuation register value.
+
+    Used by the hardware-button watcher to recover the user-facing volume
+    (0..100) from byte 8 or byte 9 of an `fe 01` input report. Returns
+    `None` if `value` doesn't match any entry — possible at the silent end
+    of the table (5-unit gaps between indices 1-9), but not for values the
+    device reaches via button stepping in normal operation.
+    """
+    for i, step in enumerate(VOLUME_STEPS):
+        if step == value:
+            return i
+    return None
 
 
 # ---- Low-level frame builders ----

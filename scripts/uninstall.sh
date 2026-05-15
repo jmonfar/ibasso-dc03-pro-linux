@@ -16,6 +16,7 @@ systemctl --user disable dc03-resume.service 2>/dev/null || true
 
 echo "==> Removing user systemd units..."
 rm -f "$USER_SYSTEMD/dc03-restore@.service"
+rm -f "$USER_SYSTEMD/dc03-watch@.service"
 rm -f "$USER_SYSTEMD/dc03-forget@.service"   # legacy: pre-v1 installs may have it
 rm -f "$USER_SYSTEMD/dc03-resume.service"
 systemctl --user daemon-reload

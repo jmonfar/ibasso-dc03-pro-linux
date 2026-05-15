@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch DC03 Pro hardware-button events on /dev/%i
+After=dc03-restore@%i.service
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/dc03 --device /dev/%i watch
+Restart=on-failure

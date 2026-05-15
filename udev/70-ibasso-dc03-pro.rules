@@ -13,4 +13,4 @@
 
 ACTION=="add", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="262a", ATTRS{idProduct}=="187e", \
     TAG+="uaccess", TAG+="systemd", \
-    ENV{SYSTEMD_USER_WANTS}+="dc03-restore@%k.service"
+    ENV{SYSTEMD_USER_WANTS}+="dc03-restore@%k.service dc03-watch@%k.service"

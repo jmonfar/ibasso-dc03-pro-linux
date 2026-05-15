@@ -54,6 +54,14 @@ state the device was already holding from previous use.
   remembers it in `~/.config/dc03/general.toml`. Volume, gain, output mode,
   and balance remain whatever the device already had.
 
+- **Hardware buttons stay in sync.** A `dc03 watch` background process,
+  fired by udev on attach, observes the device's input-report stream and
+  records hardware volume-button presses into `volume.toml` (including
+  any balance preserved across button presses). So the stored config
+  reflects both CLI changes and physical button changes — useful for the
+  resume hook to re-assert the right value if the device ever cold-boots
+  without remembering.
+
 - **Subsequent plug-ins and resume-from-sleep.** Each replug and each
   wakeup replays only the controls you have set. If filter is the only
   thing you've ever set, only filter gets replayed.

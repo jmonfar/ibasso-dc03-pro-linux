@@ -13,6 +13,10 @@ A single CLI binary, `dc03`, with subcommands. No long-running process.
   `dc03 balance <-50..50>` — interactive control of the rare-change settings.
 - `dc03 restore` — replay stored settings to the device. Intended to be
   invoked by udev on attach; also runnable by hand.
+- `dc03 watch` — long-running input-report watcher. Reads `fe 01`
+  events from the hidraw node and writes the recovered volume + balance
+  into `volume.toml`. Intended to be invoked by udev on attach (alongside
+  `restore`) so hardware-button changes stay in sync with the config.
 - `dc03 forget` — clear the recorded device path. Manual cleanup only;
   see Disconnect handling for why we don't run it automatically.
 
@@ -24,6 +28,7 @@ subcommand of the CLI — it runs for ~300 ms and exits.
 
 ```
 USB attach      →   udev rule        →   systemd user service   →   dc03 restore
+USB attach      →   udev rule        →   systemd user service   →   dc03 watch  (long-running)
 system resume   →   sleep targets    →   systemd user service   →   dc03 restore
 user input      →                                                   dc03 <cmd>
 ```
@@ -190,12 +195,15 @@ What gets shipped:
 - The `dc03` console script (via uv / pyproject entry point).
 - `udev/70-ibasso-dc03-pro.rules` — `TAG+="uaccess"` plus
   `ENV{SYSTEMD_USER_WANTS}` entries for attach/detach.
-- `systemd/dc03-restore@.service` and `systemd/dc03-resume.service` —
-  user-level units that invoke the CLI. `dc03-restore@.service` is a
-  template fired by udev on attach with the device path (e.g.
-  `hidraw5`) as the instance argument; `dc03-resume.service` is a plain
-  unit hooked into `sleep.target` / `suspend.target` /
-  `hibernate.target` post-actions.
+- `systemd/dc03-restore@.service`, `systemd/dc03-watch@.service`, and
+  `systemd/dc03-resume.service` — user-level units that invoke the CLI.
+  The `@.service` templates are fired by udev on attach with the device
+  path (e.g. `hidraw5`) as the instance argument: `dc03-restore@` is a
+  one-shot that replays stored settings, `dc03-watch@` is a long-running
+  reader (Type=simple, Restart=on-failure) that streams hardware-button
+  events into `volume.toml` and exits cleanly when the device
+  disconnects. `dc03-resume.service` is a plain unit hooked into
+  `sleep.target` / `suspend.target` / `hibernate.target` post-actions.
 - An installer / `make install` target that places these in
   `/etc/udev/rules.d/` and `~/.config/systemd/user/` (or the equivalent
   XDG location), then reloads udev.

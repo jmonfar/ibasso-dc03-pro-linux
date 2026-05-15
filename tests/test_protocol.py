@@ -10,9 +10,11 @@ import pytest
 
 from dc03.core.protocol import (
     OUTPUT_REPORT_SIZE,
+    VOLUME_STEPS,
     digital_filter_reports,
     gain_reports,
     output_reports,
+    volume_from_attenuation,
     volume_reports,
 )
 
@@ -191,6 +193,32 @@ def test_volume_out_of_range_raises(bad_volume: int):
 def test_balance_out_of_range_raises(bad_balance: int):
     with pytest.raises(ValueError):
         volume_reports(50, bad_balance)
+
+
+# ---- general invariants ----
+
+
+# ---- volume_from_attenuation (reverse lookup) ----
+
+
+def test_volume_from_attenuation_round_trips_every_index():
+    """Every step in VOLUME_STEPS reverse-looks-up to its own index."""
+    for i, step in enumerate(VOLUME_STEPS):
+        assert volume_from_attenuation(step) == i
+
+
+def test_volume_from_attenuation_returns_none_for_unknown_value():
+    """Attenuation values not in the table return None (no nearest-match)."""
+    # 154 is in the 5-unit gap between VOLUME_STEPS[1]=155 and [2]=150
+    assert volume_from_attenuation(154) is None
+    assert volume_from_attenuation(200) is None
+    assert volume_from_attenuation(-1) is None
+
+
+def test_volume_from_attenuation_boundary_values():
+    """Loudest (0) and silent (255) are recoverable."""
+    assert volume_from_attenuation(0) == 100   # loudest
+    assert volume_from_attenuation(255) == 0   # silent
 
 
 # ---- general invariants ----

@@ -101,19 +101,22 @@ byte  0-3   0x00            header/zero
 byte  4-5   marker          report-type discriminator
 byte  6-7   seq echo        16-bit LE; matches seq of the write being
                             acknowledged, or 0x0000 for non-write events
-byte  8     attenuation     current DAC attenuation register on `fe 01`
-                            frames; stale cache on `00 00` echoes (see
-                            marker table below)
-byte  9     copy of byte 8
+byte  8     L attenuation   left-channel attenuation register on `fe 01`
+                            frames (fresh); stale cache of the last
+                            `fe 01` byte 8 on `00 00` echoes (see marker
+                            table below)
+byte  9     R attenuation   right-channel attenuation register; same
+                            semantics as byte 8. Equal to byte 8 when
+                            balance=0; differs when balance≠0
 byte 10-31  0x00            padding
 ```
 
 ### Marker semantics
 
-| Marker (bytes 4-5) | Byte 8 (attenuation) | Meaning |
-| --- | --- | --- |
-| `fe 01` | **Fresh current attenuation register.** Reverse-look up in `VOLUME_STEPS` to recover the user-facing volume. Reliable for state tracking. | External state change — typically a hardware volume-button press. Each button press emits one `fe 01` report stepping the register one `VOLUME_STEPS` index. |
-| `00 00` | **Stale cache of the last `fe 01` byte 8 value.** Host writes do *not* refresh it, even when audio output changes. Zero until the first button event since attach. | Echo response to a host write. The useful field is `seq_echo` (per-write ack); byte 8 is decoration. |
+| Marker (bytes 4-5) | Byte 8 (L attenuation) | Byte 9 (R attenuation) | Meaning |
+| --- | --- | --- | --- |
+| `fe 01` | **Fresh L register.** | **Fresh R register.** Equal to byte 8 when balance=0; differs otherwise. Recover user-facing volume as `volume_from_attenuation(max(L, R))` and balance as `L - R` (signed). Reliable for state tracking. | External state change — typically a hardware volume-button press. Buttons step both registers in lock-step, preserving any current balance offset (empirically verified). |
+| `00 00` | **Stale cache of the last `fe 01` byte 8 value.** | **Stale cache of the last `fe 01` byte 9 value.** Host writes do *not* refresh either; both are zero until the first button event since attach. | Echo response to a host write. The useful field is `seq_echo` (per-write ack); bytes 8 and 9 are decoration. |
 
 A third frame, also marker `00 00` but with `seq_echo == 0x0000`, is
 non-deterministically interleaved mid-transaction during a volume change.
