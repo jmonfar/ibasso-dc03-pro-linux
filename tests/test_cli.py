@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -482,3 +483,103 @@ def test_watch_mixed_stream_only_acts_on_fe01(isolated):
     loaded = load_volume()
     assert loaded.volume == 51
     assert loaded.balance == 0
+
+
+# ---- install-system / uninstall-system ----
+
+
+def _mock_subprocess(monkeypatch) -> list[list[str]]:
+    """Replace subprocess.run with a recorder; returns the call list."""
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr("dc03.cli.main.subprocess.run", fake_run)
+    return calls
+
+
+def test_install_system_refuses_when_run_as_root(isolated, monkeypatch, capsys):
+    monkeypatch.setattr("dc03.cli.main.os.geteuid", lambda: 0)
+    _mock_subprocess(monkeypatch)
+
+    assert main(["install-system"]) == 1
+    assert "normal user" in capsys.readouterr().err
+
+
+def test_install_system_invokes_expected_commands(isolated, monkeypatch):
+    tmp_path, _ = isolated
+    monkeypatch.setattr("dc03.cli.main.os.geteuid", lambda: 1000)
+    calls = _mock_subprocess(monkeypatch)
+
+    assert main(["install-system"]) == 0
+
+    # Udev rule placed via `sudo install ...`
+    sudo_install = [c for c in calls if c[:2] == ["sudo", "install"]]
+    assert len(sudo_install) == 1
+    assert sudo_install[0][-1] == "/etc/udev/rules.d/70-ibasso-dc03-pro.rules"
+
+    # Udev daemon reload + trigger
+    assert ["sudo", "udevadm", "control", "--reload"] in calls
+    assert ["sudo", "udevadm", "trigger", "--subsystem-match=hidraw"] in calls
+
+    # systemd-user daemon reload
+    assert ["systemctl", "--user", "daemon-reload"] in calls
+
+    # User unit files actually copied into the XDG location
+    user_systemd = tmp_path / "config" / "systemd" / "user"
+    assert (user_systemd / "dc03-restore@.service").exists()
+    assert (user_systemd / "dc03-watch@.service").exists()
+
+
+def test_uninstall_system_refuses_when_run_as_root(isolated, monkeypatch, capsys):
+    monkeypatch.setattr("dc03.cli.main.os.geteuid", lambda: 0)
+    _mock_subprocess(monkeypatch)
+
+    assert main(["uninstall-system"]) == 1
+    assert "normal user" in capsys.readouterr().err
+
+
+def test_uninstall_system_removes_units_and_invokes_sudo(isolated, monkeypatch):
+    tmp_path, _ = isolated
+    monkeypatch.setattr("dc03.cli.main.os.geteuid", lambda: 1000)
+    calls = _mock_subprocess(monkeypatch)
+
+    # Simulate a prior install: place unit files under the XDG user dir.
+    user_systemd = tmp_path / "config" / "systemd" / "user"
+    user_systemd.mkdir(parents=True)
+    (user_systemd / "dc03-restore@.service").write_text("stub")
+    (user_systemd / "dc03-watch@.service").write_text("stub")
+
+    assert main(["uninstall-system"]) == 0
+
+    # The user unit files are gone.
+    assert not (user_systemd / "dc03-restore@.service").exists()
+    assert not (user_systemd / "dc03-watch@.service").exists()
+
+    # systemd-user daemon reload + udev rule removal via sudo + udevadm reload.
+    assert ["systemctl", "--user", "daemon-reload"] in calls
+    assert any(c[:3] == ["sudo", "rm", "-f"] for c in calls)
+    assert ["sudo", "udevadm", "control", "--reload"] in calls
+
+
+def test_uninstall_system_cleans_up_legacy_units(isolated, monkeypatch):
+    """Legacy units from older installs are disabled and removed."""
+    tmp_path, _ = isolated
+    monkeypatch.setattr("dc03.cli.main.os.geteuid", lambda: 1000)
+    calls = _mock_subprocess(monkeypatch)
+
+    user_systemd = tmp_path / "config" / "systemd" / "user"
+    user_systemd.mkdir(parents=True)
+    (user_systemd / "dc03-resume.service").write_text("legacy stub")
+    (user_systemd / "dc03-forget@.service").write_text("legacy stub")
+
+    assert main(["uninstall-system"]) == 0
+
+    assert not (user_systemd / "dc03-resume.service").exists()
+    assert not (user_systemd / "dc03-forget@.service").exists()
+
+    # Best-effort disable was attempted.
+    assert ["systemctl", "--user", "disable", "dc03-resume.service"] in calls
+    assert ["systemctl", "--user", "disable", "dc03-forget@.service"] in calls

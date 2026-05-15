@@ -81,8 +81,8 @@ udev → config:
 
 1. On attach, the udev rule invokes `dc03 restore --device $DEVNAME`, which
    writes `path = "$DEVNAME"` into `device.toml`.
-2. On detach, the udev rule invokes `dc03 forget`, which deletes
-   `device.toml`.
+2. On detach: nothing fires automatically (see Disconnect handling).
+   `dc03 forget` is available as a manual cleanup subcommand.
 3. All other CLI subcommands resolve the path in this order:
    1. `--device` flag if explicitly passed.
    2. `device.toml` contents if present.
@@ -200,65 +200,65 @@ whatever long-running component gets built later, not to v1.
 
 ## Install bundle
 
-What gets shipped:
+What gets shipped inside the wheel:
 
 - The `dc03` console script (via uv / pyproject entry point).
-- `udev/70-ibasso-dc03-pro.rules` — `TAG+="uaccess"` plus
-  `ENV{SYSTEMD_USER_WANTS}` entries for attach/detach.
-- `systemd/dc03-restore@.service` and `systemd/dc03-watch@.service` —
-  user-level templates fired by udev on attach with the device path
-  (e.g. `hidraw5`) as the instance argument. `dc03-restore@` is a
-  one-shot that replays stored settings; `dc03-watch@` is a long-running
-  reader (Type=simple, Restart=on-failure) that streams hardware-button
-  events into `volume.toml` and exits cleanly when the device
-  disconnects.
-- An installer / `make install` target that places these in
-  `/etc/udev/rules.d/` and `~/.config/systemd/user/` (or the equivalent
-  XDG location), then reloads udev.
+- `src/dc03/_data/udev/70-ibasso-dc03-pro.rules` — `TAG+="uaccess"`
+  plus a `SYSTEMD_USER_WANTS` entry that fires both attach-time services.
+- `src/dc03/_data/systemd/dc03-restore@.service` and
+  `dc03-watch@.service` — user-level templates fired by udev on attach
+  with the device path (e.g. `hidraw5`) as the instance argument.
+  `dc03-restore@` is a one-shot that replays stored settings;
+  `dc03-watch@` is a long-running reader (Type=simple,
+  Restart=on-failure) that streams hardware-button events into
+  `volume.toml` and exits cleanly when the device disconnects.
+
+The `dc03 install-system` / `dc03 uninstall-system` CLI subcommands
+read these bundled files via `importlib.resources` and copy them into
+their canonical locations (`/etc/udev/rules.d/` and the XDG user
+systemd dir), invoking `sudo` only for the system-level udev step.
 
 ## Distribution
 
-How users are expected to install once the tool stabilises.
+GitHub is the only distribution channel. No PyPI release; `uv` and
+`pipx` both accept git URLs as install sources, which is good enough for
+this audience.
 
 ### Recommended end-user flow
 
 ```sh
-uv tool install dc03-pro
+uv tool install --from git+https://github.com/jmonfar/ibasso-dc03-pro-linux@v0.1 dc03
 dc03 install-system
 ```
 
 `uv tool install` places the `dc03` console script in `~/.local/bin/`
 (reliably on the user systemd manager's PATH on modern distros) inside an
 isolated venv that uv manages. It also fetches a matching Python
-interpreter if the system one doesn't satisfy `requires-python`.
+interpreter if the system one doesn't satisfy `requires-python`. Pinning
+to a tagged release (`@v0.1`) gives users a stable target.
 
-`dc03 install-system` is a subcommand we plan to add (it does not exist
-yet — see below). It does what `scripts/install.sh` does today: places the
-udev rule and three systemd user units, reloads both daemons, enables the
-resume hook. The difference is that the subcommand reads the files from
-package data (`importlib.resources`) inside the installed wheel rather than
-from a repo checkout, so users don't need the source tree.
+`dc03 install-system` reads the bundled udev rule and systemd unit
+templates from package data (`importlib.resources`) and copies them into
+their canonical locations, invoking `sudo` only for the system-level
+udev step.
 
 ### Alternative: pipx
 
 ```sh
-pipx install dc03-pro
+pipx install git+https://github.com/jmonfar/ibasso-dc03-pro-linux@v0.1
 dc03 install-system
 ```
 
-Equivalent UX, still supported. Not the primary recommendation because uv
-is the direction Python tooling is moving and we already use it for
-development — one tool, one mental model. pipx stays in the README as a
-fallback for users who already have it installed.
+Equivalent UX for users who already use pipx.
 
 ### Hacking on the tool
 
 ```sh
-git clone <repo>
+git clone https://github.com/jmonfar/ibasso-dc03-pro-linux
 cd ibasso-dc03-pro-linux
 uv sync
 ln -s "$PWD/.venv/bin/dc03" ~/.local/bin/dc03   # editable install + on PATH
-./scripts/install.sh                            # udev + systemd plumbing
+dc03 install-system
 ```
 
 The symlink makes the editable `.venv/bin/dc03` reachable from the user
@@ -266,19 +266,11 @@ systemd manager's PATH. Edits to `src/dc03/` take effect on next CLI
 invocation without reinstall. `uv tool install` is the wrong choice for
 this flow because it makes a frozen copy.
 
-### What changes in the repo when we ship
-
-- `pyproject.toml` grows a wheel-data section
-  (`[tool.hatch.build.targets.wheel.force-include]` or `shared-data`)
-  including `udev/*.rules` and `systemd/*.service` so they ride along in
-  the installed package.
-- The CLI gains `install-system` / `uninstall-system` subcommands. The
-  current `scripts/install.sh` / `scripts/uninstall.sh` stay for the
-  hacking flow but stop being the recommended end-user path.
-- A first release goes to PyPI.
-
 ### Explicitly not pursued
 
+- **PyPI release.** Not worth the recurring overhead (version bumps,
+  upload discipline, name-squatting risk) for a niche tool when
+  `pip install git+URL` works just as well.
 - **deb/rpm/AUR packages of our own.** Audience is niche; per-distro
   packaging is busy-work. Happy to accept community packagers if anyone
   steps up.
@@ -286,13 +278,8 @@ this flow because it makes a frozen copy.
   writing udev rules and triggering user systemd units across the bus.
 - **`curl … | sh` installer.** Security smell, and `uv tool install` is
   already one line.
-
-### When to do this
-
-After real-device shakedown confirms the udev/systemd integration actually
-behaves as designed (attach → restore, detach → forget, resume → restore).
-Until then, the repo-based install (`scripts/install.sh`) is the right
-level of investment.
+- **CI / automated test runs on PR.** Low PR volume expected; manual
+  `uv run pytest` before tagging is enough.
 
 ## Explicitly out of scope for v1
 
@@ -300,8 +287,5 @@ level of investment.
   empty. Error out instead — it's a corner case for an already-permissioned
   setup.
 - Tray UI, status indicator, or any long-running graphical component.
-- Hardware-button reactive state tracking (the `fe 01` input-report loop).
-  The protocol and data flow are documented in `protocol.md`; the
-  implementation is deferred.
 - Multi-DC03 support. Single device assumed; second attach overwrites the
   first in `device.toml`.

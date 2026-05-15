@@ -11,21 +11,26 @@ shaken out on a wide range of hardware.
 
 ## Install
 
-The CLI itself runs from a uv-managed virtualenv (`uv sync` once, then
-`uv run dc03 --help`). To wire it up so settings persist and replay
-automatically across plug/unplug and resume:
+One-line install, no clone needed — pinned to the tested v0.1 release:
 
 ```sh
-uv sync
-./scripts/install.sh        # places the udev rule and 3 systemd user units
+uv tool install --from git+https://github.com/jmonfar/ibasso-dc03-pro-linux@v0.1 dc03
+dc03 install-system
 ```
 
-What the installer does:
+Or with pipx:
 
-- Drops `udev/70-ibasso-dc03-pro.rules` into `/etc/udev/rules.d/` (sudo).
+```sh
+pipx install git+https://github.com/jmonfar/ibasso-dc03-pro-linux@v0.1
+dc03 install-system
+```
+
+What `dc03 install-system` does:
+
+- Drops `70-ibasso-dc03-pro.rules` into `/etc/udev/rules.d/` (prompts for sudo).
 - Drops `dc03-restore@.service` and `dc03-watch@.service` into
-  `~/.config/systemd/user/`.
-- Reloads udev and systemd-user.
+  `~/.config/systemd/user/` (no sudo).
+- Reloads udev and the user systemd daemon.
 
 After install, plugging in the DC03 grants the seat user access to its
 hidraw node and replays the stored settings. The CLI commands
@@ -36,8 +41,24 @@ Unplugs aren't automatically detected (a systemd limitation around udev
 unplugged will report the stored path as no longer valid, and the next
 replug rewrites it cleanly.
 
-`./scripts/uninstall.sh` reverses everything (leaving stored settings
+`dc03 uninstall-system` reverses everything (leaving stored settings
 behind).
+
+### Hacking on it
+
+To run from a local checkout with edits taking effect immediately:
+
+```sh
+git clone https://github.com/jmonfar/ibasso-dc03-pro-linux
+cd ibasso-dc03-pro-linux
+uv sync
+ln -s "$PWD/.venv/bin/dc03" ~/.local/bin/dc03
+dc03 install-system
+```
+
+Editable install — changes to `src/dc03/` take effect on the next CLI
+invocation, no rebuild step. `uv tool install` is the wrong choice for
+this flow because it makes a frozen copy.
 
 ## How settings are managed
 
@@ -112,7 +133,18 @@ MIT. See [LICENSE](LICENSE).
 
 This project draws on protocol knowledge and reference code from
 [ibasso-dc03-pro-macos](https://github.com/Chandru03/ibasso-dc03-pro-macos) by
-Chandru03, used under the MIT License:
+Chandru03, used under the MIT License.
+
+Built collaboratively with [Claude](https://www.anthropic.com/claude)
+(Anthropic's AI assistant) — design discussions, protocol analysis,
+implementation, tests, and documentation. The decisions, the audio
+testing on real hardware, the empirical protocol findings, and the
+final say on everything are mine.
+
+---
+
+[ibasso-dc03-pro-macos](https://github.com/Chandru03/ibasso-dc03-pro-macos)
+license text in full:
 
 > Copyright (c) 2026 Chandru03
 >

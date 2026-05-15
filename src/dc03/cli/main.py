@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import argparse
 import errno
+import importlib.resources
 import os
+import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -234,6 +237,119 @@ def _cmd_forget(_args: argparse.Namespace) -> None:
     print("Device path cleared")
 
 
+# ---- System installer (udev rule + systemd user units) ----
+#
+# Replaces the historical scripts/install.sh and scripts/uninstall.sh:
+# bundled data files are read from importlib.resources, so the same code
+# path works for editable installs (uv sync), wheel installs, and the
+# `uv tool install --from git+URL` flow.
+#
+# Two user-level systemd units get installed, both fired by the udev attach
+# rule: dc03-restore@.service (one-shot settings replay) and
+# dc03-watch@.service (long-running button-event watcher). There used to
+# be a third (dc03-resume.service) for hibernate-resume, but empirically
+# the user-manager's sleep-target integration never fired it on tested
+# hardware — see docs/design.md "Resume from suspend / hibernate" before
+# re-attempting.
+
+
+_UDEV_DEST = Path("/etc/udev/rules.d/70-ibasso-dc03-pro.rules")
+_UDEV_FILENAME = "70-ibasso-dc03-pro.rules"
+_USER_UNITS = ("dc03-restore@.service", "dc03-watch@.service")
+_LEGACY_USER_UNITS = ("dc03-forget@.service", "dc03-resume.service")
+
+
+def _user_systemd_dir() -> Path:
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        return Path(xdg) / "systemd" / "user"
+    return Path.home() / ".config" / "systemd" / "user"
+
+
+def _cmd_install_system(_args: argparse.Namespace) -> None:
+    if os.geteuid() == 0:
+        raise CliUsageError(
+            "run as your normal user; sudo will be invoked only for the "
+            "system-level udev step."
+        )
+
+    data_pkg = importlib.resources.files("dc03._data")
+    user_systemd = _user_systemd_dir()
+
+    print(f"==> Installing udev rule to {_UDEV_DEST} (sudo)...")
+    with importlib.resources.as_file(
+        data_pkg / "udev" / _UDEV_FILENAME
+    ) as src:
+        subprocess.run(
+            ["sudo", "install", "-m", "0644", str(src), str(_UDEV_DEST)],
+            check=True,
+        )
+
+    print("==> Reloading udev...")
+    subprocess.run(["sudo", "udevadm", "control", "--reload"], check=True)
+    subprocess.run(
+        ["sudo", "udevadm", "trigger", "--subsystem-match=hidraw"], check=True
+    )
+
+    print(f"==> Installing user systemd units to {user_systemd}...")
+    user_systemd.mkdir(parents=True, exist_ok=True)
+    for unit_name in _USER_UNITS:
+        with importlib.resources.as_file(
+            data_pkg / "systemd" / unit_name
+        ) as src:
+            dest = user_systemd / unit_name
+            shutil.copy(src, dest)
+            dest.chmod(0o644)
+
+    print("==> Reloading user systemd...")
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+
+    print(
+        "\nDone. Plug in (or replug) the DC03 Pro to apply its stored "
+        "settings.\nRun `dc03 --help` for the available commands."
+    )
+
+
+def _cmd_uninstall_system(_args: argparse.Namespace) -> None:
+    if os.geteuid() == 0:
+        raise CliUsageError(
+            "run as your normal user; sudo will be invoked only for the "
+            "system-level udev step."
+        )
+
+    user_systemd = _user_systemd_dir()
+
+    # Best-effort disable of legacy units from older installs.
+    print("==> Disabling legacy units if present...")
+    for legacy in _LEGACY_USER_UNITS:
+        subprocess.run(
+            ["systemctl", "--user", "disable", legacy],
+            stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            check=False,
+        )
+
+    print(f"==> Removing user systemd units from {user_systemd}...")
+    for name in _USER_UNITS + _LEGACY_USER_UNITS:
+        unit_path = user_systemd / name
+        if unit_path.exists():
+            unit_path.unlink()
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+
+    print(f"==> Removing udev rule from {_UDEV_DEST} (sudo)...")
+    subprocess.run(["sudo", "rm", "-f", str(_UDEV_DEST)], check=True)
+    subprocess.run(["sudo", "udevadm", "control", "--reload"], check=True)
+    subprocess.run(
+        ["sudo", "udevadm", "trigger", "--subsystem-match=hidraw"], check=True
+    )
+
+    print(
+        "\nUninstalled. Stored settings remain at "
+        "$XDG_CONFIG_HOME/dc03/ "
+        "(or ~/.config/dc03/);\nremove by hand if you want to wipe them."
+    )
+
+
 def _cmd_watch(_args: argparse.Namespace, device: Path) -> None:
     """Long-running watcher: sync hardware-button events into volume.toml.
 
@@ -351,6 +467,14 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser(
         "forget", help="manually clear the stored device path"
     )
+    sub.add_parser(
+        "install-system",
+        help="install udev rule + systemd user units (sudo for udev)",
+    )
+    sub.add_parser(
+        "uninstall-system",
+        help="reverse install-system (leaves stored settings behind)",
+    )
 
     return parser
 
@@ -360,8 +484,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        if args.command == "forget":
-            _cmd_forget(args)
+        no_device_cmds = {
+            "forget": _cmd_forget,
+            "install-system": _cmd_install_system,
+            "uninstall-system": _cmd_uninstall_system,
+        }
+        if args.command in no_device_cmds:
+            no_device_cmds[args.command](args)
             return 0
 
         device = resolve_device_path(args.device)
