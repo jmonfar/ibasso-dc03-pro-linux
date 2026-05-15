@@ -25,7 +25,7 @@ Homepage = "https://github.com/jmonfar/ibasso-dc03-pro-linux"
 Repository = "https://github.com/jmonfar/ibasso-dc03-pro-linux"
 
 [dependency-groups]
-dev = []
+dev = ["pytest>=8"]
 
 [build-system]
 requires = ["hatchling"]
@@ -33,3 +33,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dc03"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
