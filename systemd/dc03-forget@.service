@@ -3,4 +3,4 @@ Description=Clear stored DC03 Pro device path (detach of %i)
 
 [Service]
 Type=oneshot
-ExecStart=dc03 forget
+ExecStart=%h/.local/bin/dc03 forget

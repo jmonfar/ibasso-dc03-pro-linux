@@ -25,6 +25,7 @@ from dc03.core.config import (
     save_device,
     save_general,
     save_volume,
+    volume_path,
 )
 
 
@@ -77,14 +78,12 @@ def test_load_general_or_default_returns_defaults_when_missing(isolated):
 
 
 def test_general_round_trips(isolated):
-    save_general(GeneralSettings(filter=4, gain=2, output=1, balance=-10))
-    assert load_general() == GeneralSettings(
-        filter=4, gain=2, output=1, balance=-10
-    )
+    save_general(GeneralSettings(filter=4, gain=2, output=1))
+    assert load_general() == GeneralSettings(filter=4, gain=2, output=1)
 
 
 def test_save_general_leaves_no_temp_file(isolated):
-    save_general(GeneralSettings(filter=2, gain=1, output=0, balance=5))
+    save_general(GeneralSettings(filter=2, gain=1, output=0))
     files = sorted(p.name for p in general_path().parent.iterdir())
     assert files == ["general.toml"]
 
@@ -96,7 +95,6 @@ def test_save_general_omits_unset_fields(isolated):
     assert "filter = 2" in content
     assert "gain" not in content
     assert "output" not in content
-    assert "balance" not in content
 
 
 def test_load_general_keeps_unset_fields_none(isolated):
@@ -105,7 +103,6 @@ def test_load_general_keeps_unset_fields_none(isolated):
     assert loaded == GeneralSettings(filter=2)
     assert loaded.gain is None
     assert loaded.output is None
-    assert loaded.balance is None
 
 
 def test_save_general_with_all_none_is_noop(isolated):
@@ -147,6 +144,26 @@ def test_volume_round_trips_with_timestamp(isolated):
 def test_volume_round_trips_without_timestamp(isolated):
     save_volume(VolumeSettings(volume=88))
     assert load_volume() == VolumeSettings(volume=88, updated_at=None)
+
+
+def test_volume_round_trips_with_balance(isolated):
+    save_volume(VolumeSettings(volume=42, balance=15))
+    loaded = load_volume()
+    assert loaded.volume == 42
+    assert loaded.balance == 15
+
+
+def test_save_volume_omits_unset_balance(isolated):
+    save_volume(VolumeSettings(volume=42))
+    content = volume_path().read_text()
+    assert "volume = 42" in content
+    assert "balance" not in content
+
+
+def test_load_volume_keeps_unset_balance_none(isolated):
+    save_volume(VolumeSettings(volume=42))
+    loaded = load_volume()
+    assert loaded.balance is None
 
 
 # ---- device.toml ----

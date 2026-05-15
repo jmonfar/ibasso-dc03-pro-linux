@@ -101,22 +101,25 @@ byte  0-3   0x00            header/zero
 byte  4-5   marker          report-type discriminator
 byte  6-7   seq echo        16-bit LE; matches seq of the write being
                             acknowledged, or 0x0000 for non-write events
-byte  8     state           current DAC attenuation register value
-byte  9     copy of byte 8 (parity, ignore)
+byte  8     attenuation     current DAC attenuation register on `fe 01`
+                            frames; stale cache on `00 00` echoes (see
+                            marker table below)
+byte  9     copy of byte 8
 byte 10-31  0x00            padding
 ```
 
 ### Marker semantics
 
-| Marker (bytes 4-5) | Meaning |
-| --- | --- |
-| `fe 01` | External state change: hardware button press, or any other event the device generated internally. **Trustworthy current state.** |
-| `00 00` | Echo response to a host write. **Byte 8 reports the state at the time the write entered the queue, not after it committed.** Do not use for state tracking. |
+| Marker (bytes 4-5) | Byte 8 (attenuation) | Meaning |
+| --- | --- | --- |
+| `fe 01` | **Fresh current attenuation register.** Reverse-look up in `VOLUME_STEPS` to recover the user-facing volume. Reliable for state tracking. | External state change — typically a hardware volume-button press. Each button press emits one `fe 01` report stepping the register one `VOLUME_STEPS` index. |
+| `00 00` | **Stale cache of the last `fe 01` byte 8 value.** Host writes do *not* refresh it, even when audio output changes. Zero until the first button event since attach. | Echo response to a host write. The useful field is `seq_echo` (per-write ack); byte 8 is decoration. |
 
 A third frame, also marker `00 00` but with `seq_echo == 0x0000`, is
-occasionally interleaved mid-transaction (observed between the seq=0x13 and
-seq=0x0B reports of a volume change). Probably an internal commit
-notification. Safe to ignore.
+non-deterministically interleaved mid-transaction during a volume change.
+Empirically: zero to two of these per 10-report burst, appearing at
+varying positions across bursts. Probably an internal commit notification.
+Safe to ignore for state tracking.
 
 ## Volume / attenuation
 
@@ -198,15 +201,15 @@ Filter index meanings: 0 fast roll-off, 1 slow roll-off, 2 short delay fast,
 ## Persistence across unplug
 
 Tested by plugging into one USB port, setting state, unplugging, waiting
->10 s, and replugging on a different port.
+>5 s, and replugging.
 
 | Setting | Persists across unplug? |
 | --- | --- |
-| Volume | **Yes** (stored in MCU NVRAM) |
-| Digital filter | Not yet tested |
-| Gain | Not yet tested |
-| Output mode | Not yet tested |
-| Balance | Not yet tested |
+| Volume | **Yes** — stored in MCU NVRAM. |
+| Balance | **Yes** — almost certainly stored as separate L/R attenuation registers in the same NVRAM as volume, given the protocol encodes balance as asymmetric L/R values in the volume transaction. |
+| Gain | **No** — confirmed empirically. Hardware default on power-up is "high" (`0x31`). |
+| Digital filter | **Likely no** — audibly inconclusive on tested setup. The Android UAC app's default of `fast roll-off` (index 0) is the presumed hardware default. |
+| Output mode | **Likely no** — not audibly tested on the available headphones. The Android UAC app's default of `normal` (`0x1C`) is the presumed hardware default. |
 
 The official Android UAC app overrides the device's stored volume with its
 own remembered value on every connect. There is no observed way to *read*
@@ -230,11 +233,8 @@ should:
 
 - Confirm filter / gain / output-mode writes require the full 2-report
   transaction vs work with a single report.
-- Verify whether filter / gain / output-mode / balance persist across
-  unplug.
-- Decode the third input-report shape (mid-transaction `00 00` commit
-  notification) — almost certainly informational, but worth recording its
-  exact triggering conditions.
+- Confirm the hardware power-on defaults for filter and output mode
+  (gain is empirically known to default to "high").
 - Determine whether any handshake or init sequence is required after USB
   attach before writes are accepted (so far, none observed needed).
 - Investigate other uses of the 0xA2 address space — only volume-related

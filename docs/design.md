@@ -88,8 +88,9 @@ manual config tampering all resolve themselves on the next plug.
 
 ## Config layout
 
-Three TOML files under `~/.config/dc03/`, split by write-frequency and
-writer identity. Each is written atomically (tempfile + `rename`).
+Three TOML files under `~/.config/dc03/`, split by **whether the device
+persists each value in its own NVRAM**. Each is written atomically
+(tempfile + `rename`).
 
 ```
 ~/.config/dc03/
@@ -97,14 +98,14 @@ writer identity. Each is written atomically (tempfile + `rename`).
 │     path = "/dev/hidraw5"
 │     attached_at = 2026-05-15T09:12:33+02:00
 │
-├── general.toml     # rare-change user prefs (replayed on attach)
+├── general.toml     # device does NOT persist these — replayed every attach
 │     filter = 0
 │     gain = 0
 │     output = 0
-│     balance = 0
 │
-└── volume.toml      # high-churn (CLI + future button-watcher widget)
+└── volume.toml      # device persists these in NVRAM — replay is safety-net
       volume = 75
+      balance = 0
       updated_at = 2026-05-15T09:14:01+02:00
 ```
 
@@ -112,11 +113,19 @@ Writers:
 
 - `device.toml` — written by `dc03 restore` (on attach), deleted by
   `dc03 forget` (on detach).
-- `general.toml` — written by interactive CLI subcommands when the user
-  changes a rare setting. Read by `dc03 restore`.
-- `volume.toml` — written by `dc03 volume`. Read by `dc03 restore`. In
-  future, also written by a hardware-button watcher that observes input
-  reports with marker `fe 01` and updates the stored volume.
+- `general.toml` — written by `dc03 filter|gain|output` interactive
+  subcommands. Read by `dc03 restore`. These controls reset to factory
+  defaults on every power-cycle of the device, so `dc03 restore` is the
+  *only* thing that keeps our preferences sticky across plug-unplug.
+- `volume.toml` — written by `dc03 volume` and `dc03 balance`. Read by
+  `dc03 restore`. The device retains volume and balance across
+  power-cycles in NVRAM (balance is just asymmetric L/R values in the
+  same multi-report transaction as volume; both attenuation registers
+  persist), so the replay-on-attach behaviour is a safety net (in case
+  the state drifted via hardware buttons or another host) rather than
+  load-bearing. In future, also written by a hardware-button watcher
+  that observes input reports with marker `fe 01` and updates the stored
+  volume.
 
 Restore is per-control: `dc03 restore` looks at each setting individually
 (filter, gain, output, balance, volume) and pushes only the ones the user
@@ -133,12 +142,14 @@ been set yet. The user runs `dc03 volume N` first.
 
 Why three files instead of one:
 
-- A volume change from a future button-watcher should never risk corrupting
-  the general settings — they're touched on different cadences.
+- The split mirrors device behaviour: `general.toml` controls reset on
+  power-cycle and must be replayed; `volume.toml` controls persist on the
+  device and need not be (but are re-asserted on attach anyway, as a
+  safety net).
+- A volume change from a future button-watcher should never risk
+  corrupting the general settings — different cadences, different writers.
 - Each writer touches one file, so atomic-rename suffices; no cross-file
   locking needed.
-- Schema-level concerns stay clean: runtime detection state is
-  conceptually distinct from user preferences and from the current volume.
 
 ## Disconnect handling
 

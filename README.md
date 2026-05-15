@@ -55,11 +55,13 @@ state the device was already holding from previous use.
   wakeup replays only the controls you have set. If filter is the only
   thing you've ever set, only filter gets replayed.
 
-- **Why this matters.** The DC03 keeps volume in non-volatile memory so
-  it remembers across power cycles. Filter, gain, and output mode
-  persistence is not yet empirically verified. Replaying only what you've
-  set means the tool never clobbers state that came from elsewhere
-  (hardware buttons, a previous host, the device's own NVRAM).
+- **What lives where.** `general.toml` holds settings the device does
+  *not* keep across power-cycles (filter, gain, output mode) — these get
+  replayed on every attach because the device forgets them on unplug.
+  `volume.toml` holds settings the device *does* persist in NVRAM (volume
+  and balance) — these would survive an unplug on their own; the CLI
+  re-asserts them on attach as a safety net in case the state drifted
+  (hardware buttons, another host).
 
 - **Balance is coupled to volume.** Changing balance requires re-sending
   the full volume transaction, so `dc03 balance N` requires you to have
@@ -67,8 +69,9 @@ state the device was already holding from previous use.
   rather than picking an arbitrary default volume and writing it.
 
 To reset to "untouched": `rm -rf ~/.config/dc03/` and replug. The device
-keeps whatever it had in NVRAM; the next time you set a control, that
-becomes the only thing the CLI replays.
+keeps volume and balance in NVRAM (those stay where you had them); filter,
+gain, and output mode revert to their hardware defaults (gain in
+particular jumps to "high" — heads up for sensitive IEMs).
 
 ## Supported Device
 

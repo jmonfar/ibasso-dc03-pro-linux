@@ -126,12 +126,17 @@ def _balance_arg(s: str) -> int:
 
 
 def _cmd_volume(args: argparse.Namespace, device: Path) -> None:
-    general = load_general_or_default()
-    balance = general.balance if general.balance is not None else 0
-    reports = protocol.volume_reports(args.level, balance=balance)
+    existing = load_volume()
+    stored_balance = existing.balance if existing is not None else None
+    balance_for_send = stored_balance if stored_balance is not None else 0
+    reports = protocol.volume_reports(args.level, balance=balance_for_send)
     send_batch(device, reports)
     save_volume(
-        VolumeSettings(volume=args.level, updated_at=datetime.now(timezone.utc))
+        VolumeSettings(
+            volume=args.level,
+            balance=stored_balance,
+            updated_at=datetime.now(timezone.utc),
+        )
     )
     print(f"Volume {args.level} applied")
 
@@ -175,9 +180,13 @@ def _cmd_balance(args: argparse.Namespace, device: Path) -> None:
         )
     reports = protocol.volume_reports(vol.volume, balance=args.value)
     send_batch(device, reports)
-    general = load_general_or_default()
-    general.balance = args.value
-    save_general(general)
+    save_volume(
+        VolumeSettings(
+            volume=vol.volume,
+            balance=args.value,
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
     print(f"Balance {args.value} applied")
 
 
@@ -207,9 +216,7 @@ def _cmd_restore(args: argparse.Namespace, device: Path) -> None:
         if general.output is not None:
             reports += protocol.output_reports(general.output)
     if vol is not None:
-        balance = 0
-        if general is not None and general.balance is not None:
-            balance = general.balance
+        balance = vol.balance if vol.balance is not None else 0
         reports += protocol.volume_reports(vol.volume, balance=balance)
 
     send_batch(device, reports)

@@ -67,13 +67,26 @@ def test_volume_uses_stored_balance(isolated):
     """Volume command must include the stored balance in the transaction."""
     tmp_path, calls = isolated
     dev = _make_valid_hidraw(tmp_path)
-    save_general(GeneralSettings(balance=10))
+    save_volume(VolumeSettings(volume=50, balance=10))
 
     main(["--device", str(dev), "volume", "50"])
 
     _, reports = calls[0]
     # balance > 0 selects the right-shifted seq set; reports[2] has seq 0x07
     assert reports[2][0] == 0x07
+
+
+def test_volume_command_preserves_stored_balance(isolated):
+    """Setting volume keeps the existing balance in volume.toml."""
+    tmp_path, calls = isolated
+    dev = _make_valid_hidraw(tmp_path)
+    save_volume(VolumeSettings(volume=30, balance=20))
+
+    main(["--device", str(dev), "volume", "60"])
+
+    loaded = load_volume()
+    assert loaded.volume == 60
+    assert loaded.balance == 20
 
 
 def test_filter_named_value_resolves(isolated):
@@ -131,7 +144,9 @@ def test_balance_uses_stored_volume(isolated):
     assert len(reports) == 10
     # VOLUME_STEPS[80] = 20 -> left channel value byte = 0x14
     assert reports[0][11] == 0x14
-    assert load_general().balance == 10
+    loaded = load_volume()
+    assert loaded.balance == 10
+    assert loaded.volume == 80  # preserved by the balance command
 
 
 def test_balance_negative_uses_left_shifted_seq_set(isolated):
@@ -152,7 +167,7 @@ def test_balance_negative_uses_left_shifted_seq_set(isolated):
 def test_restore_replays_filter_gain_output_volume(isolated):
     tmp_path, calls = isolated
     dev = _make_valid_hidraw(tmp_path)
-    save_general(GeneralSettings(filter=4, gain=2, output=1, balance=0))
+    save_general(GeneralSettings(filter=4, gain=2, output=1))
     save_volume(VolumeSettings(volume=80))
     save_device(DeviceRecord(path=str(dev)))
 
@@ -161,6 +176,21 @@ def test_restore_replays_filter_gain_output_volume(isolated):
     _, reports = calls[0]
     # 2 filter + 2 gain + 2 output + 10 volume = 16
     assert len(reports) == 16
+
+
+def test_restore_with_volume_balance_uses_balance_seq_set(isolated):
+    """volume.toml has balance: restore replays balance inside volume_reports."""
+    tmp_path, calls = isolated
+    dev = _make_valid_hidraw(tmp_path)
+    save_device(DeviceRecord(path=str(dev)))
+    save_volume(VolumeSettings(volume=50, balance=10))
+
+    assert main(["restore"]) == 0
+
+    _, reports = calls[0]
+    assert len(reports) == 10
+    # balance > 0: reports[2] uses right-shifted seq 0x07
+    assert reports[2][0] == 0x07
 
 
 def test_restore_with_explicit_device_persists_path(isolated):
@@ -212,7 +242,7 @@ def test_restore_with_only_general_skips_volume(isolated):
     tmp_path, calls = isolated
     dev = _make_valid_hidraw(tmp_path)
     save_device(DeviceRecord(path=str(dev)))
-    save_general(GeneralSettings(filter=2, gain=1, output=0, balance=0))
+    save_general(GeneralSettings(filter=2, gain=1, output=0))
 
     assert main(["restore"]) == 0
 

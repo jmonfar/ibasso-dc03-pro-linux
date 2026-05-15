@@ -34,20 +34,34 @@ class DeviceNotFoundError(Exception):
 class GeneralSettings:
     """Per-control state from `general.toml`.
 
-    Each field is independently optional: `None` means the user has never
-    set this control, so `dc03 restore` will skip pushing it and leave
+    Holds the controls the device does NOT persist across power-cycles
+    (filter, gain, output mode). `dc03 restore` re-pushes these on every
+    attach. Each field is independently optional: `None` means the user
+    has never set this control, so restore will skip pushing it and leave
     whatever the device already has.
     """
 
     filter: int | None = None
     gain: int | None = None
     output: int | None = None
-    balance: int | None = None
 
 
 @dataclass
 class VolumeSettings:
+    """Volume + balance state from `volume.toml`.
+
+    Holds the controls the device DOES persist in NVRAM across
+    power-cycles. Replay on attach is a safety-net re-assertion (in case
+    the device's state drifted via hardware buttons or another host),
+    not load-bearing for the values to survive.
+
+    Balance is grouped with volume because the protocol encodes balance as
+    asymmetric L/R attenuation registers in the same multi-report
+    transaction as volume — they're one thing at the device level.
+    """
+
     volume: int = 75
+    balance: int | None = None
     updated_at: datetime | None = None
 
 
@@ -121,7 +135,6 @@ def load_general() -> GeneralSettings | None:
         filter=int(data["filter"]) if "filter" in data else None,
         gain=int(data["gain"]) if "gain" in data else None,
         output=int(data["output"]) if "output" in data else None,
-        balance=int(data["balance"]) if "balance" in data else None,
     )
 
 
@@ -149,8 +162,6 @@ def save_general(settings: GeneralSettings) -> None:
         lines.append(f"gain = {settings.gain}")
     if settings.output is not None:
         lines.append(f"output = {settings.output}")
-    if settings.balance is not None:
-        lines.append(f"balance = {settings.balance}")
     if not lines:
         return
     _atomic_write(general_path(), "\n".join(lines) + "\n")
@@ -168,8 +179,10 @@ def load_volume() -> VolumeSettings | None:
     updated_at = data.get("updated_at")
     if not isinstance(updated_at, datetime):
         updated_at = None
+    balance = int(data["balance"]) if "balance" in data else None
     return VolumeSettings(
         volume=int(data.get("volume", 75)),
+        balance=balance,
         updated_at=updated_at,
     )
 
@@ -181,6 +194,8 @@ def load_volume_or_default() -> VolumeSettings:
 
 def save_volume(settings: VolumeSettings) -> None:
     lines = [f"volume = {settings.volume}"]
+    if settings.balance is not None:
+        lines.append(f"balance = {settings.balance}")
     if settings.updated_at is not None:
         lines.append(f"updated_at = {settings.updated_at.isoformat()}")
     _atomic_write(volume_path(), "\n".join(lines) + "\n")
