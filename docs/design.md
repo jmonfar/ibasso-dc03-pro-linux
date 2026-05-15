@@ -161,6 +161,84 @@ What gets shipped:
   `/etc/udev/rules.d/` and `~/.config/systemd/user/` (or the equivalent
   XDG location), then reloads udev.
 
+## Distribution
+
+How users are expected to install once the tool stabilises.
+
+### Recommended end-user flow
+
+```sh
+uv tool install dc03-pro
+dc03 install-system
+```
+
+`uv tool install` places the `dc03` console script in `~/.local/bin/`
+(reliably on the user systemd manager's PATH on modern distros) inside an
+isolated venv that uv manages. It also fetches a matching Python
+interpreter if the system one doesn't satisfy `requires-python`.
+
+`dc03 install-system` is a subcommand we plan to add (it does not exist
+yet — see below). It does what `scripts/install.sh` does today: places the
+udev rule and three systemd user units, reloads both daemons, enables the
+resume hook. The difference is that the subcommand reads the files from
+package data (`importlib.resources`) inside the installed wheel rather than
+from a repo checkout, so users don't need the source tree.
+
+### Alternative: pipx
+
+```sh
+pipx install dc03-pro
+dc03 install-system
+```
+
+Equivalent UX, still supported. Not the primary recommendation because uv
+is the direction Python tooling is moving and we already use it for
+development — one tool, one mental model. pipx stays in the README as a
+fallback for users who already have it installed.
+
+### Hacking on the tool
+
+```sh
+git clone <repo>
+cd ibasso-dc03-pro-linux
+uv sync
+ln -s "$PWD/.venv/bin/dc03" ~/.local/bin/dc03   # editable install + on PATH
+./scripts/install.sh                            # udev + systemd plumbing
+```
+
+The symlink makes the editable `.venv/bin/dc03` reachable from the user
+systemd manager's PATH. Edits to `src/dc03/` take effect on next CLI
+invocation without reinstall. `uv tool install` is the wrong choice for
+this flow because it makes a frozen copy.
+
+### What changes in the repo when we ship
+
+- `pyproject.toml` grows a wheel-data section
+  (`[tool.hatch.build.targets.wheel.force-include]` or `shared-data`)
+  including `udev/*.rules` and `systemd/*.service` so they ride along in
+  the installed package.
+- The CLI gains `install-system` / `uninstall-system` subcommands. The
+  current `scripts/install.sh` / `scripts/uninstall.sh` stay for the
+  hacking flow but stop being the recommended end-user path.
+- A first release goes to PyPI.
+
+### Explicitly not pursued
+
+- **deb/rpm/AUR packages of our own.** Audience is niche; per-distro
+  packaging is busy-work. Happy to accept community packagers if anyone
+  steps up.
+- **Flatpak/Snap.** Incompatible with the integration: the sandbox blocks
+  writing udev rules and triggering user systemd units across the bus.
+- **`curl … | sh` installer.** Security smell, and `uv tool install` is
+  already one line.
+
+### When to do this
+
+After real-device shakedown confirms the udev/systemd integration actually
+behaves as designed (attach → restore, detach → forget, resume → restore).
+Until then, the repo-based install (`scripts/install.sh`) is the right
+level of investment.
+
 ## Explicitly out of scope for v1
 
 - Autodiscovery / fallback scanning when `--device` is omitted and config is
