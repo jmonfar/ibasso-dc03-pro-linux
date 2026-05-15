@@ -6,8 +6,35 @@ Not affiliated with, endorsed by, or supported by iBasso.
 
 ## Status
 
-Early work in progress. Protocol research complete; application code not yet
-written.
+Early work in progress. Protocol research complete; CLI implemented; not yet
+shaken out on a wide range of hardware.
+
+## Install
+
+The CLI itself runs from a uv-managed virtualenv (`uv sync` once, then
+`uv run dc03 --help`). To wire it up so settings persist and replay
+automatically across plug/unplug and resume:
+
+```sh
+uv sync
+./scripts/install.sh        # places the udev rule and 3 systemd user units
+```
+
+What the installer does:
+
+- Drops `udev/70-ibasso-dc03-pro.rules` into `/etc/udev/rules.d/` (sudo).
+- Drops `dc03-restore@.service`, `dc03-forget@.service`, and
+  `dc03-resume.service` into `~/.config/systemd/user/`.
+- Reloads udev, enables the resume hook.
+
+After install, plugging in the DC03 grants the seat user access to its
+hidraw node and replays the stored settings. Unplugging clears the stored
+device path. The CLI commands (`dc03 volume 50`, `dc03 filter nos`, etc.)
+auto-resolve the device path from `~/.config/dc03/device.toml` written by
+the attach handler.
+
+`./scripts/uninstall.sh` reverses everything (leaving stored settings
+behind).
 
 ## Supported Device
 

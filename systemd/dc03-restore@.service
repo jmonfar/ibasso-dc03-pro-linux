@@ -1,0 +1,6 @@
+[Unit]
+Description=Restore DC03 Pro settings to /dev/%i
+
+[Service]
+Type=oneshot
+ExecStart=dc03 --device /dev/%i restore
