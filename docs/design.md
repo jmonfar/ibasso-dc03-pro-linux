@@ -23,9 +23,10 @@ subcommand of the CLI — it runs for ~300 ms and exits.
 ## Trigger model
 
 ```
-USB attach   →   udev rule   →   systemd user service   →   dc03 restore
-USB detach   →   udev rule   →   systemd user service   →   dc03 forget
-user input   →                                              dc03 <cmd>
+USB attach      →   udev rule        →   systemd user service   →   dc03 restore
+USB detach      →   udev rule        →   systemd user service   →   dc03 forget
+system resume   →   sleep targets    →   systemd user service   →   dc03 restore
+user input      →                                                   dc03 <cmd>
 ```
 
 Why a systemd user service in the middle:
@@ -38,6 +39,26 @@ Why a systemd user service in the middle:
 
 The same udev rule that triggers the service also applies `TAG+="uaccess"`,
 giving the seat user direct hidraw access without a custom group.
+
+### Resume from suspend / hibernate
+
+Hibernation cuts USB bus power, so the DAC cold-boots on resume. The kernel
+re-enumerates USB and *usually* fires a fresh `add` event, which runs
+`dc03 restore` via the existing udev path. But this isn't guaranteed across
+every kernel + USB-controller combo, and any general settings that aren't
+NVRAM-persisted on the device (see open questions in `protocol.md`) would
+silently revert if the restore didn't fire.
+
+To close the gap, a plain user unit `dc03-resume.service` hooks into
+`sleep.target` / `suspend.target` / `hibernate.target` post-actions and
+invokes `dc03 restore` (with no `--device` argument) on every wakeup. The
+CLI resolves the path from `device.toml`, validates it against sysfs, and
+either re-applies settings (when the path is still valid) or exits quietly
+(letting the eventual udev `add` event do the work when the path is stale).
+Either way, the end state is correct.
+
+Cost: one extra unit file, plus an occasional redundant ~300 ms replay when
+both triggers fire on the same wakeup. Idempotent and unnoticeable.
 
 ## Device discovery
 
@@ -130,8 +151,12 @@ What gets shipped:
 - The `dc03` console script (via uv / pyproject entry point).
 - `udev/70-ibasso-dc03-pro.rules` — `TAG+="uaccess"` plus
   `ENV{SYSTEMD_USER_WANTS}` entries for attach/detach.
-- `systemd/dc03-restore@.service` and `systemd/dc03-forget@.service`
-  (user-level template units that invoke the CLI).
+- `systemd/dc03-restore@.service`, `systemd/dc03-forget@.service`, and
+  `systemd/dc03-resume.service` — user-level units that invoke the CLI.
+  The `@.service` ones are templates fired by udev with the device path
+  as the instance argument; `dc03-resume.service` is a plain unit hooked
+  into `sleep.target` / `suspend.target` / `hibernate.target`
+  post-actions.
 - An installer / `make install` target that places these in
   `/etc/udev/rules.d/` and `~/.config/systemd/user/` (or the equivalent
   XDG location), then reloads udev.
