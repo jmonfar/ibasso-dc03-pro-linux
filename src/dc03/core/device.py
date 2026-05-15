@@ -25,7 +25,7 @@ DEFAULT_SYS_ROOT = Path("/sys")
 
 def validate_hidraw_path(
     path: Path | str,
-    sys_root: Path | str = DEFAULT_SYS_ROOT,
+    sys_root: Path | str | None = None,
 ) -> bool:
     """Return True iff `path` is a hidraw node belonging to a DC03 Pro.
 
@@ -34,13 +34,15 @@ def validate_hidraw_path(
       2. The matching sysfs entry's `device/uevent` file declares VID/PID
          `262A:187E`.
 
-    Pass an alternate `sys_root` (e.g. a temp directory) to override the
-    default `/sys` lookup during tests.
+    `sys_root` defaults to `DEFAULT_SYS_ROOT` (looked up at call time so tests
+    can monkeypatch the module attribute).
     """
     path = Path(path)
     if not path.exists():
         return False
 
+    if sys_root is None:
+        sys_root = DEFAULT_SYS_ROOT
     uevent = Path(sys_root) / "class" / "hidraw" / path.name / "device" / "uevent"
     if not uevent.is_file():
         return False
