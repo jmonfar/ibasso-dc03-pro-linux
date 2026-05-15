@@ -23,9 +23,9 @@ uv sync
 What the installer does:
 
 - Drops `udev/70-ibasso-dc03-pro.rules` into `/etc/udev/rules.d/` (sudo).
-- Drops `dc03-restore@.service` and `dc03-resume.service` into
+- Drops `dc03-restore@.service` and `dc03-watch@.service` into
   `~/.config/systemd/user/`.
-- Reloads udev, enables the resume hook.
+- Reloads udev and systemd-user.
 
 After install, plugging in the DC03 grants the seat user access to its
 hidraw node and replays the stored settings. The CLI commands
@@ -58,9 +58,8 @@ state the device was already holding from previous use.
   fired by udev on attach, observes the device's input-report stream and
   records hardware volume-button presses into `volume.toml` (including
   any balance preserved across button presses). So the stored config
-  reflects both CLI changes and physical button changes — useful for the
-  resume hook to re-assert the right value if the device ever cold-boots
-  without remembering.
+  reflects both CLI changes and physical button changes — useful for any
+  later restore (e.g. after a replug) to re-assert the right value.
 
 - **Subsequent plug-ins and resume-from-sleep.** Each replug and each
   wakeup replays only the controls you have set. If filter is the only
@@ -83,6 +82,21 @@ To reset to "untouched": `rm -rf ~/.config/dc03/` and replug. The device
 keeps volume and balance in NVRAM (those stay where you had them); filter,
 gain, and output mode revert to their hardware defaults (gain in
 particular jumps to "high" — heads up for sensitive IEMs).
+
+## Hibernation caveat
+
+After resuming from full hibernation (not from suspend), the DAC's
+filter, gain, and output mode can revert to hardware defaults — volume
+and balance are unaffected (they're in the device's NVRAM). The cause is
+kernel/USB behaviour rather than anything we can fix in user space: on
+some setups the kernel silently rebinds the device across hibernation
+without firing a fresh udev `add` event, so our attach hook (which would
+re-push the lost settings) never runs.
+
+**Workaround:** physically unplug and replug the DAC after resuming.
+That forces a fresh udev event and a normal restore cycle, putting your
+filter/gain/output back where they were. (See `docs/design.md` for the
+history of why we don't ship an automatic resume hook.)
 
 ## Supported Device
 

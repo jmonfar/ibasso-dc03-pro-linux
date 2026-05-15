@@ -29,7 +29,6 @@ subcommand of the CLI — it runs for ~300 ms and exits.
 ```
 USB attach      →   udev rule        →   systemd user service   →   dc03 restore
 USB attach      →   udev rule        →   systemd user service   →   dc03 watch  (long-running)
-system resume   →   sleep targets    →   systemd user service   →   dc03 restore
 user input      →                                                   dc03 <cmd>
 ```
 
@@ -46,23 +45,34 @@ giving the seat user direct hidraw access without a custom group.
 
 ### Resume from suspend / hibernate
 
-Hibernation cuts USB bus power, so the DAC cold-boots on resume. The kernel
-re-enumerates USB and *usually* fires a fresh `add` event, which runs
-`dc03 restore` via the existing udev path. But this isn't guaranteed across
-every kernel + USB-controller combo, and any general settings that aren't
-NVRAM-persisted on the device (see open questions in `protocol.md`) would
-silently revert if the restore didn't fire.
+Not handled. Hibernation cuts USB bus power and the DAC cold-boots, so
+filter/gain/output reset to hardware defaults (volume and balance survive
+in NVRAM). We initially shipped a `dc03-resume.service` user unit anchored
+to `sleep.target` / `suspend.target` / `hibernate.target` post-actions
+that would have re-pushed the lost settings, but empirically on the
+tested kernel + USB-controller combo `journalctl` confirmed it never
+fires — the user-manager's sleep-target integration stays inactive across
+hibernation, and the kernel silently rebinds the device without emitting
+a fresh udev `add` event. The unit was dead weight on every machine we
+could observe, so it's been removed from the install bundle rather than
+shipped as a feature that doesn't deliver.
 
-To close the gap, a plain user unit `dc03-resume.service` hooks into
-`sleep.target` / `suspend.target` / `hibernate.target` post-actions and
-invokes `dc03 restore` (with no `--device` argument) on every wakeup. The
-CLI resolves the path from `device.toml`, validates it against sysfs, and
-either re-applies settings (when the path is still valid) or exits quietly
-(letting the eventual udev `add` event do the work when the path is stale).
-Either way, the end state is correct.
+Workaround for the user: physically unplug and replug the DAC after
+resuming from hibernation. That forces a fresh udev `add` event and a
+normal restore cycle. Documented in the README.
 
-Cost: one extra unit file, plus an occasional redundant ~300 ms replay when
-both triggers fire on the same wakeup. Idempotent and unnoticeable.
+If we ever want to revisit this, the options would be:
+
+- A `dc03-resume.service` that scans sysfs for `262A:187E` (re-introducing
+  the autodiscovery logic we explicitly removed) rather than trusting
+  `device.toml`, in case `dc03-resume.service` *does* fire on some distros
+  and the device path has changed.
+- A watcher that notices a state-reset on the device by observing
+  register values that don't match what we sent, and self-triggers a
+  restore. Requires being able to read register state, which we can't
+  reliably do without input-report events.
+
+Neither is in scope for v1.
 
 ## Device discovery
 
@@ -195,15 +205,13 @@ What gets shipped:
 - The `dc03` console script (via uv / pyproject entry point).
 - `udev/70-ibasso-dc03-pro.rules` — `TAG+="uaccess"` plus
   `ENV{SYSTEMD_USER_WANTS}` entries for attach/detach.
-- `systemd/dc03-restore@.service`, `systemd/dc03-watch@.service`, and
-  `systemd/dc03-resume.service` — user-level units that invoke the CLI.
-  The `@.service` templates are fired by udev on attach with the device
-  path (e.g. `hidraw5`) as the instance argument: `dc03-restore@` is a
-  one-shot that replays stored settings, `dc03-watch@` is a long-running
+- `systemd/dc03-restore@.service` and `systemd/dc03-watch@.service` —
+  user-level templates fired by udev on attach with the device path
+  (e.g. `hidraw5`) as the instance argument. `dc03-restore@` is a
+  one-shot that replays stored settings; `dc03-watch@` is a long-running
   reader (Type=simple, Restart=on-failure) that streams hardware-button
   events into `volume.toml` and exits cleanly when the device
-  disconnects. `dc03-resume.service` is a plain unit hooked into
-  `sleep.target` / `suspend.target` / `hibernate.target` post-actions.
+  disconnects.
 - An installer / `make install` target that places these in
   `/etc/udev/rules.d/` and `~/.config/systemd/user/` (or the equivalent
   XDG location), then reloads udev.
