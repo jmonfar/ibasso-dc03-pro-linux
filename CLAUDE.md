@@ -9,6 +9,9 @@ the unofficial macOS menu bar controller for the iBasso DC03 Pro USB DAC.
 - `docs/protocol.md` — authoritative byte-level protocol notes (frame
   layouts, marker semantics, multi-report commit rule, volume curve,
   persistence behaviour, open questions).
+- `docs/design.md` — software architecture decisions (single-CLI model,
+  udev → systemd user service trigger, device discovery via config not
+  scan, three-file config layout, what's in/out of scope for v1).
 - `src/dc03/core/protocol.py` — protocol constants, the `VOLUME_STEPS`
   table, and helpers that build the 16-byte output reports.
 
@@ -28,8 +31,9 @@ Layered Python package under `src/dc03/`:
 
 - `core/` — protocol constants, frame builders, hidraw I/O. Pure stdlib.
 - `cli/` — argparse entry point exposed as the `dc03` console script.
-- `daemon/` — udev-triggered settings replay on USB attach. Not yet
-  implemented.
+  Includes the `restore` / `forget` subcommands invoked by udev on
+  attach/detach via a systemd user service. There is no separate daemon
+  module — see `docs/design.md`.
 
 Project managed with [uv](https://github.com/astral-sh/uv). After clone:
 
