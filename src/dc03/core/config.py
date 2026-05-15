@@ -32,10 +32,17 @@ class DeviceNotFoundError(Exception):
 
 @dataclass
 class GeneralSettings:
-    filter: int = protocol.FILTER_FAST_ROLLOFF
-    gain: int = protocol.GAIN_LOW
-    output: int = protocol.OUTPUT_NORMAL
-    balance: int = 0
+    """Per-control state from `general.toml`.
+
+    Each field is independently optional: `None` means the user has never
+    set this control, so `dc03 restore` will skip pushing it and leave
+    whatever the device already has.
+    """
+
+    filter: int | None = None
+    gain: int | None = None
+    output: int | None = None
+    balance: int | None = None
 
 
 @dataclass
@@ -100,38 +107,63 @@ def _atomic_write(path: Path, content: str) -> None:
 # ---- general.toml ----
 
 
-def load_general() -> GeneralSettings:
-    """Return general settings, or defaults if no config file exists."""
+def load_general() -> GeneralSettings | None:
+    """Return general settings, or None when no config file exists.
+
+    Keys absent from the file remain `None` on the returned record — the
+    caller can then distinguish "user set this" from "user hasn't touched it".
+    """
     path = general_path()
     if not path.exists():
-        return GeneralSettings()
+        return None
     data = tomllib.loads(path.read_text())
     return GeneralSettings(
-        filter=int(data.get("filter", protocol.FILTER_FAST_ROLLOFF)),
-        gain=int(data.get("gain", protocol.GAIN_LOW)),
-        output=int(data.get("output", protocol.OUTPUT_NORMAL)),
-        balance=int(data.get("balance", 0)),
+        filter=int(data["filter"]) if "filter" in data else None,
+        gain=int(data["gain"]) if "gain" in data else None,
+        output=int(data["output"]) if "output" in data else None,
+        balance=int(data["balance"]) if "balance" in data else None,
     )
+
+
+def load_general_or_default() -> GeneralSettings:
+    """Return general settings, falling back to defaults when absent.
+
+    Use this in interactive subcommands that need a usable record. Use
+    plain `load_general()` in code (like `dc03 restore`) that must
+    distinguish "user has set something" from "first connection".
+    """
+    return load_general() or GeneralSettings()
 
 
 def save_general(settings: GeneralSettings) -> None:
-    content = (
-        f"filter = {settings.filter}\n"
-        f"gain = {settings.gain}\n"
-        f"output = {settings.output}\n"
-        f"balance = {settings.balance}\n"
-    )
-    _atomic_write(general_path(), content)
+    """Write only the fields that are not None.
+
+    A `GeneralSettings()` with everything None is a no-op (no file is
+    written, no existing file is touched). Saving a record with one field
+    set produces a file containing only that key.
+    """
+    lines: list[str] = []
+    if settings.filter is not None:
+        lines.append(f"filter = {settings.filter}")
+    if settings.gain is not None:
+        lines.append(f"gain = {settings.gain}")
+    if settings.output is not None:
+        lines.append(f"output = {settings.output}")
+    if settings.balance is not None:
+        lines.append(f"balance = {settings.balance}")
+    if not lines:
+        return
+    _atomic_write(general_path(), "\n".join(lines) + "\n")
 
 
 # ---- volume.toml ----
 
 
-def load_volume() -> VolumeSettings:
-    """Return volume settings, or defaults if no config file exists."""
+def load_volume() -> VolumeSettings | None:
+    """Return volume settings, or None when no config file exists."""
     path = volume_path()
     if not path.exists():
-        return VolumeSettings()
+        return None
     data = tomllib.loads(path.read_text())
     updated_at = data.get("updated_at")
     if not isinstance(updated_at, datetime):
@@ -140,6 +172,11 @@ def load_volume() -> VolumeSettings:
         volume=int(data.get("volume", 75)),
         updated_at=updated_at,
     )
+
+
+def load_volume_or_default() -> VolumeSettings:
+    """Return volume settings, falling back to defaults when absent."""
+    return load_volume() or VolumeSettings()
 
 
 def save_volume(settings: VolumeSettings) -> None:

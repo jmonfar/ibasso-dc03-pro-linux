@@ -18,7 +18,9 @@ from dc03.core.config import (
     general_path,
     load_device,
     load_general,
+    load_general_or_default,
     load_volume,
+    load_volume_or_default,
     resolve_device_path,
     save_device,
     save_general,
@@ -66,8 +68,12 @@ def test_config_dir_falls_back_to_home_dotconfig(monkeypatch):
 # ---- general.toml ----
 
 
-def test_load_general_returns_defaults_when_missing(isolated):
-    assert load_general() == GeneralSettings()
+def test_load_general_returns_none_when_missing(isolated):
+    assert load_general() is None
+
+
+def test_load_general_or_default_returns_defaults_when_missing(isolated):
+    assert load_general_or_default() == GeneralSettings()
 
 
 def test_general_round_trips(isolated):
@@ -83,11 +89,51 @@ def test_save_general_leaves_no_temp_file(isolated):
     assert files == ["general.toml"]
 
 
+def test_save_general_omits_unset_fields(isolated):
+    """Only fields the user has set are persisted to disk."""
+    save_general(GeneralSettings(filter=2))
+    content = general_path().read_text()
+    assert "filter = 2" in content
+    assert "gain" not in content
+    assert "output" not in content
+    assert "balance" not in content
+
+
+def test_load_general_keeps_unset_fields_none(isolated):
+    save_general(GeneralSettings(filter=2))
+    loaded = load_general()
+    assert loaded == GeneralSettings(filter=2)
+    assert loaded.gain is None
+    assert loaded.output is None
+    assert loaded.balance is None
+
+
+def test_save_general_with_all_none_is_noop(isolated):
+    """Empty record doesn't write a file; existing file isn't disturbed."""
+    save_general(GeneralSettings(filter=3))
+    assert general_path().exists()
+    save_general(GeneralSettings())  # all None
+    # Existing file untouched.
+    assert load_general() == GeneralSettings(filter=3)
+
+
+def test_incrementally_setting_fields_accumulates(isolated):
+    save_general(GeneralSettings(filter=2))
+    g = load_general_or_default()
+    g.gain = 1
+    save_general(g)
+    assert load_general() == GeneralSettings(filter=2, gain=1)
+
+
 # ---- volume.toml ----
 
 
-def test_load_volume_returns_defaults_when_missing(isolated):
-    assert load_volume() == VolumeSettings()
+def test_load_volume_returns_none_when_missing(isolated):
+    assert load_volume() is None
+
+
+def test_load_volume_or_default_returns_defaults_when_missing(isolated):
+    assert load_volume_or_default() == VolumeSettings()
 
 
 def test_volume_round_trips_with_timestamp(isolated):

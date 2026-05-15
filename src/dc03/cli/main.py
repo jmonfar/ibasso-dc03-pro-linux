@@ -14,13 +14,19 @@ from dc03.core.config import (
     VolumeSettings,
     forget_device,
     load_general,
+    load_general_or_default,
     load_volume,
+    load_volume_or_default,
     resolve_device_path,
     save_device,
     save_general,
     save_volume,
 )
 from dc03.core.device import send_batch
+
+
+class CliUsageError(Exception):
+    """User-facing error: command can't proceed given the current state."""
 
 
 # ---- Named-value tables for friendly CLI args ----
@@ -120,8 +126,9 @@ def _balance_arg(s: str) -> int:
 
 
 def _cmd_volume(args: argparse.Namespace, device: Path) -> None:
-    general = load_general()
-    reports = protocol.volume_reports(args.level, balance=general.balance)
+    general = load_general_or_default()
+    balance = general.balance if general.balance is not None else 0
+    reports = protocol.volume_reports(args.level, balance=balance)
     send_batch(device, reports)
     save_volume(
         VolumeSettings(volume=args.level, updated_at=datetime.now(timezone.utc))
@@ -132,7 +139,7 @@ def _cmd_volume(args: argparse.Namespace, device: Path) -> None:
 def _cmd_filter(args: argparse.Namespace, device: Path) -> None:
     reports = protocol.digital_filter_reports(args.value)
     send_batch(device, reports)
-    general = load_general()
+    general = load_general_or_default()
     general.filter = args.value
     save_general(general)
     print(f"Filter {args.value} applied")
@@ -141,7 +148,7 @@ def _cmd_filter(args: argparse.Namespace, device: Path) -> None:
 def _cmd_gain(args: argparse.Namespace, device: Path) -> None:
     reports = protocol.gain_reports(args.value)
     send_batch(device, reports)
-    general = load_general()
+    general = load_general_or_default()
     general.gain = args.value
     save_general(general)
     print(f"Gain {args.value} applied")
@@ -150,17 +157,25 @@ def _cmd_gain(args: argparse.Namespace, device: Path) -> None:
 def _cmd_output(args: argparse.Namespace, device: Path) -> None:
     reports = protocol.output_reports(args.value)
     send_batch(device, reports)
-    general = load_general()
+    general = load_general_or_default()
     general.output = args.value
     save_general(general)
     print(f"Output {args.value} applied")
 
 
 def _cmd_balance(args: argparse.Namespace, device: Path) -> None:
-    volume = load_volume().volume
-    reports = protocol.volume_reports(volume, balance=args.value)
+    # Changing balance requires re-sending the full volume transaction, which
+    # forces us to pick *some* volume value. Without a stored volume we'd be
+    # silently writing our default to NVRAM — bail out instead.
+    vol = load_volume()
+    if vol is None:
+        raise CliUsageError(
+            "cannot adjust balance without a stored volume. "
+            "Set volume first with `dc03 volume <0..100>`."
+        )
+    reports = protocol.volume_reports(vol.volume, balance=args.value)
     send_batch(device, reports)
-    general = load_general()
+    general = load_general_or_default()
     general.balance = args.value
     save_general(general)
     print(f"Balance {args.value} applied")
@@ -177,16 +192,32 @@ def _cmd_restore(args: argparse.Namespace, device: Path) -> None:
                 attached_at=datetime.now(timezone.utc),
             )
         )
+
+    # Push only the settings the user has actually configured. Each control
+    # is checked independently — setting just filter and replugging replays
+    # filter only, leaving whatever the device has for gain/output/volume.
     general = load_general()
     vol = load_volume()
-    reports = (
-        protocol.digital_filter_reports(general.filter)
-        + protocol.gain_reports(general.gain)
-        + protocol.output_reports(general.output)
-        + protocol.volume_reports(vol.volume, balance=general.balance)
-    )
+    reports: list[bytes] = []
+    if general is not None:
+        if general.filter is not None:
+            reports += protocol.digital_filter_reports(general.filter)
+        if general.gain is not None:
+            reports += protocol.gain_reports(general.gain)
+        if general.output is not None:
+            reports += protocol.output_reports(general.output)
+    if vol is not None:
+        balance = 0
+        if general is not None and general.balance is not None:
+            balance = general.balance
+        reports += protocol.volume_reports(vol.volume, balance=balance)
+
     send_batch(device, reports)
-    print("Settings restored")
+
+    if reports:
+        print("Settings restored")
+    else:
+        print("Device path recorded; no stored settings to restore yet")
 
 
 def _cmd_forget(_args: argparse.Namespace) -> None:
@@ -265,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
         }
         dispatch[args.command](args, device)
         return 0
-    except DeviceNotFoundError as e:
+    except (DeviceNotFoundError, CliUsageError) as e:
         print(f"dc03: {e}", file=sys.stderr)
         return 1
     except (FileNotFoundError, PermissionError, OSError) as e:

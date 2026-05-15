@@ -188,6 +188,93 @@ def test_restore_without_device_uses_config(isolated):
     assert len(calls) == 1
 
 
+def test_restore_first_connect_no_config_sends_nothing(isolated, capsys):
+    """First connect: record device.toml, send no reports to the DAC."""
+    tmp_path, calls = isolated
+    dev = _make_valid_hidraw(tmp_path)
+
+    assert main(["--device", str(dev), "restore"]) == 0
+
+    record = load_device()
+    assert record is not None
+    assert record.path == str(dev)
+
+    # No reports were sent (regardless of whether send_batch was called).
+    total = sum(len(reports) for _, reports in calls)
+    assert total == 0
+
+    out = capsys.readouterr().out
+    assert "no stored settings" in out.lower()
+
+
+def test_restore_with_only_general_skips_volume(isolated):
+    """general.toml exists, volume.toml missing: filter/gain/output only."""
+    tmp_path, calls = isolated
+    dev = _make_valid_hidraw(tmp_path)
+    save_device(DeviceRecord(path=str(dev)))
+    save_general(GeneralSettings(filter=2, gain=1, output=0, balance=0))
+
+    assert main(["restore"]) == 0
+
+    _, reports = calls[0]
+    # 2 filter + 2 gain + 2 output = 6
+    assert len(reports) == 6
+
+
+def test_restore_with_only_volume_skips_general(isolated):
+    """volume.toml exists, general.toml missing: volume reports only."""
+    tmp_path, calls = isolated
+    dev = _make_valid_hidraw(tmp_path)
+    save_device(DeviceRecord(path=str(dev)))
+    save_volume(VolumeSettings(volume=60))
+
+    assert main(["restore"]) == 0
+
+    _, reports = calls[0]
+    # 10 volume reports
+    assert len(reports) == 10
+    # No general means balance=0 (balanced seq set)
+    assert reports[2][0] == 0x03
+
+
+def test_restore_with_only_one_general_field_set(isolated):
+    """User set just filter: restore pushes filter reports only."""
+    tmp_path, calls = isolated
+    dev = _make_valid_hidraw(tmp_path)
+    save_device(DeviceRecord(path=str(dev)))
+    save_general(GeneralSettings(filter=2))  # gain/output/balance all None
+
+    assert main(["restore"]) == 0
+
+    _, reports = calls[0]
+    assert len(reports) == 2  # filter only
+
+
+def test_filter_then_restore_replays_only_filter(isolated):
+    """End-to-end: set filter; replug restore pushes filter only."""
+    tmp_path, calls = isolated
+    dev = _make_valid_hidraw(tmp_path)
+
+    assert main(["--device", str(dev), "filter", "nos"]) == 0
+    calls.clear()
+
+    assert main(["--device", str(dev), "restore"]) == 0
+    _, reports = calls[0]
+    assert len(reports) == 2  # filter only — not gain/output/volume
+
+
+def test_balance_without_stored_volume_errors(isolated, capsys):
+    """Adjusting balance with no volume set: bail out, don't write to device."""
+    tmp_path, calls = isolated
+    dev = _make_valid_hidraw(tmp_path)
+
+    assert main(["--device", str(dev), "balance", "10"]) == 1
+    err = capsys.readouterr().err
+    assert "stored volume" in err
+    # No reports sent.
+    assert calls == []
+
+
 def test_forget_clears_device_toml(isolated):
     _, _ = isolated
     save_device(DeviceRecord(path="/dev/hidraw5"))

@@ -36,6 +36,40 @@ the attach handler.
 `./scripts/uninstall.sh` reverses everything (leaving stored settings
 behind).
 
+## How settings are managed
+
+The CLI is deliberately unobtrusive: it only pushes settings to the device
+that you have explicitly set. The point is to never silently overwrite
+state the device was already holding from previous use.
+
+- **First connection.** Plugging in the DAC for the first time (after the
+  udev rule and systemd units are installed) does *not* alter its state.
+  The attach hook records the device path under `~/.config/dc03/`; nothing
+  is sent to the hardware.
+
+- **Setting one control.** `dc03 filter nos` sends the filter change and
+  remembers it in `~/.config/dc03/general.toml`. Volume, gain, output mode,
+  and balance remain whatever the device already had.
+
+- **Subsequent plug-ins and resume-from-sleep.** Each replug and each
+  wakeup replays only the controls you have set. If filter is the only
+  thing you've ever set, only filter gets replayed.
+
+- **Why this matters.** The DC03 keeps volume in non-volatile memory so
+  it remembers across power cycles. Filter, gain, and output mode
+  persistence is not yet empirically verified. Replaying only what you've
+  set means the tool never clobbers state that came from elsewhere
+  (hardware buttons, a previous host, the device's own NVRAM).
+
+- **Balance is coupled to volume.** Changing balance requires re-sending
+  the full volume transaction, so `dc03 balance N` requires you to have
+  set a volume first via `dc03 volume N`. Otherwise the command errors out
+  rather than picking an arbitrary default volume and writing it.
+
+To reset to "untouched": `rm -rf ~/.config/dc03/` and replug. The device
+keeps whatever it had in NVRAM; the next time you set a control, that
+becomes the only thing the CLI replays.
+
 ## Supported Device
 
 | Device | USB Vendor ID | USB Product ID |

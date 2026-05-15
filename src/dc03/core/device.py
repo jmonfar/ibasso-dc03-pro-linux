@@ -69,8 +69,12 @@ def send_batch(
     `docs/protocol.md`.
 
     All reports are size-validated up front so a bad report aborts the whole
-    batch before any I/O.
+    batch before any I/O. An empty `reports` list is a no-op (the device
+    node is not even opened).
     """
+    if not reports:
+        return
+
     for i, report in enumerate(reports):
         if len(report) != protocol.OUTPUT_REPORT_SIZE:
             raise ValueError(

@@ -118,6 +118,19 @@ Writers:
   future, also written by a hardware-button watcher that observes input
   reports with marker `fe 01` and updates the stored volume.
 
+Restore is per-control: `dc03 restore` looks at each setting individually
+(filter, gain, output, balance, volume) and pushes only the ones the user
+has explicitly configured. On first connection nothing is configured, so
+the device's current state is preserved untouched — only `device.toml`
+gets recorded. Each `dc03 <control> <value>` invocation adds that one
+control to the replay set without changing the others; the on-disk
+`general.toml` represents the *set* of explicitly-set controls, not a
+full record (`None` means "user has never set this").
+
+`dc03 balance N` is the one exception: because changing balance requires
+re-sending the full volume transaction, it errors out if no volume has
+been set yet. The user runs `dc03 volume N` first.
+
 Why three files instead of one:
 
 - A volume change from a future button-watcher should never risk corrupting

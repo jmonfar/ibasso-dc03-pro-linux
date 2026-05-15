@@ -138,6 +138,12 @@ def test_send_batch_raises_on_missing_path(tmp_path: Path):
         send_batch(tmp_path / "nonexistent", [bytes(16)])
 
 
+def test_send_batch_empty_list_is_noop(tmp_path: Path):
+    """Empty reports list short-circuits: device node is not opened."""
+    nonexistent = tmp_path / "would-fail-if-opened"
+    send_batch(nonexistent, [])  # must not raise FileNotFoundError
+
+
 # ---- read_input_report ----
 
 
