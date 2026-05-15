@@ -23,15 +23,18 @@ uv sync
 What the installer does:
 
 - Drops `udev/70-ibasso-dc03-pro.rules` into `/etc/udev/rules.d/` (sudo).
-- Drops `dc03-restore@.service`, `dc03-forget@.service`, and
-  `dc03-resume.service` into `~/.config/systemd/user/`.
+- Drops `dc03-restore@.service` and `dc03-resume.service` into
+  `~/.config/systemd/user/`.
 - Reloads udev, enables the resume hook.
 
 After install, plugging in the DC03 grants the seat user access to its
-hidraw node and replays the stored settings. Unplugging clears the stored
-device path. The CLI commands (`dc03 volume 50`, `dc03 filter nos`, etc.)
-auto-resolve the device path from `~/.config/dc03/device.toml` written by
-the attach handler.
+hidraw node and replays the stored settings. The CLI commands
+(`dc03 volume 50`, `dc03 filter nos`, etc.) auto-resolve the device path
+from `~/.config/dc03/device.toml` written by the attach handler.
+Unplugs aren't automatically detected (a systemd limitation around udev
+`remove` events — see `docs/design.md`); the next CLI invocation while
+unplugged will report the stored path as no longer valid, and the next
+replug rewrites it cleanly.
 
 `./scripts/uninstall.sh` reverses everything (leaving stored settings
 behind).

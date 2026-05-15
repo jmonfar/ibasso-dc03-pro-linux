@@ -30,7 +30,6 @@ sudo udevadm trigger --subsystem-match=hidraw
 echo "==> Installing user systemd units to $USER_SYSTEMD..."
 install -d "$USER_SYSTEMD"
 install -m 0644 systemd/dc03-restore@.service "$USER_SYSTEMD/"
-install -m 0644 systemd/dc03-forget@.service  "$USER_SYSTEMD/"
 install -m 0644 systemd/dc03-resume.service   "$USER_SYSTEMD/"
 
 echo "==> Reloading user systemd and enabling resume hook..."

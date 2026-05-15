@@ -13,8 +13,8 @@ A single CLI binary, `dc03`, with subcommands. No long-running process.
   `dc03 balance <-50..50>` — interactive control of the rare-change settings.
 - `dc03 restore` — replay stored settings to the device. Intended to be
   invoked by udev on attach; also runnable by hand.
-- `dc03 forget` — clear the recorded device path. Intended to be invoked by
-  udev on detach.
+- `dc03 forget` — clear the recorded device path. Manual cleanup only;
+  see Disconnect handling for why we don't run it automatically.
 
 There is **no** separate daemon module. The "udev-triggered settings replay"
 function originally pencilled in as `src/dc03/daemon/` is just the `restore`
@@ -24,7 +24,6 @@ subcommand of the CLI — it runs for ~300 ms and exits.
 
 ```
 USB attach      →   udev rule        →   systemd user service   →   dc03 restore
-USB detach      →   udev rule        →   systemd user service   →   dc03 forget
 system resume   →   sleep targets    →   systemd user service   →   dc03 restore
 user input      →                                                   dc03 <cmd>
 ```
@@ -153,15 +152,31 @@ Why three files instead of one:
 
 ## Disconnect handling
 
-No in-session disconnect detection is required in v1:
+There is intentionally no automatic disconnect handler in v1.
+
+We tried wiring one up via a `ACTION=="remove"` udev rule that set
+`SYSTEMD_USER_WANTS=dc03-forget@…service`. Empirically: the rule fires
+correctly, the env var lands in the remove event with the right value,
+and the `systemd` tag is present — but `systemd-udev` only consumes
+`SYSTEMD_USER_WANTS` when a device unit becomes *active* (i.e. on `add`).
+On `remove` the device unit goes inactive and no units are pulled in. The
+env var is silently dropped. The only workaround would be to `RUN+=` a
+shell script from udev running as root and then `runuser` into the seat
+user — brittle, hard-coded to a single user, and out of scope.
+
+Instead we accept the limitation and rely on validate-on-read:
 
 - The CLI is one-shot. If the device disappears between flag parsing and
-  write, the write fails with `EIO`/`ENODEV`; we surface that as a normal
-  error.
-- The `restore` subcommand is one-shot — by the time the user unplugs, it
-  has long exited.
-- The detach rule clears `device.toml`, so subsequent CLI invocations cleanly
-  error out with "DC03 not detected".
+  write, the write fails with `EIO`/`ENODEV` and we surface that as a
+  normal error.
+- After a disconnect, `device.toml` retains the (now-stale) path until
+  the next CLI invocation. `resolve_device_path` revalidates the path
+  against sysfs on every call, so the first command after unplug errors
+  cleanly with "Stored device path /dev/hidrawN is no longer valid".
+- `dc03 forget` is still a CLI subcommand for users who want to clear the
+  stale entry manually.
+- The next replug fires the attach rule, `dc03 restore` runs, and
+  `device.toml` is rewritten with the new path.
 
 If a future tray UI or hardware-button-watcher process holds an open fd
 across plug events, it will see `POLLHUP`/`EIO` on disconnect and can
@@ -175,12 +190,12 @@ What gets shipped:
 - The `dc03` console script (via uv / pyproject entry point).
 - `udev/70-ibasso-dc03-pro.rules` — `TAG+="uaccess"` plus
   `ENV{SYSTEMD_USER_WANTS}` entries for attach/detach.
-- `systemd/dc03-restore@.service`, `systemd/dc03-forget@.service`, and
-  `systemd/dc03-resume.service` — user-level units that invoke the CLI.
-  The `@.service` ones are templates fired by udev with the device path
-  as the instance argument; `dc03-resume.service` is a plain unit hooked
-  into `sleep.target` / `suspend.target` / `hibernate.target`
-  post-actions.
+- `systemd/dc03-restore@.service` and `systemd/dc03-resume.service` —
+  user-level units that invoke the CLI. `dc03-restore@.service` is a
+  template fired by udev on attach with the device path (e.g.
+  `hidraw5`) as the instance argument; `dc03-resume.service` is a plain
+  unit hooked into `sleep.target` / `suspend.target` /
+  `hibernate.target` post-actions.
 - An installer / `make install` target that places these in
   `/etc/udev/rules.d/` and `~/.config/systemd/user/` (or the equivalent
   XDG location), then reloads udev.

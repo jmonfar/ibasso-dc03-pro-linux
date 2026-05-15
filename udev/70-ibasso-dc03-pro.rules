@@ -1,16 +1,16 @@
 # iBasso DC03 Pro — hidraw control endpoint
 #
 # Grants the active-seat user direct access to the device's HID node, and
-# fires user-level systemd services on attach/detach so dc03 can persist
+# fires the user-level dc03-restore service on attach so dc03 can persist
 # the device path and replay stored settings. See docs/design.md.
+#
+# There is intentionally no detach rule: systemd's SYSTEMD_USER_WANTS
+# mechanism only fires user units on `add` events, not on `remove`.
+# Empirically: the env var is preserved into the remove event, but
+# systemd-udev never instantiates a user unit from it. Stale device.toml
+# entries are handled by validate-on-read inside the CLI itself
+# (resolve_device_path).
 
-# Attach: grant uaccess + tag for systemd, fire restore service.
 ACTION=="add", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="262a", ATTRS{idProduct}=="187e", \
     TAG+="uaccess", TAG+="systemd", \
     ENV{SYSTEMD_USER_WANTS}+="dc03-restore@%k.service"
-
-# Detach: ATTRS{} isn't available on remove, so match against the env vars
-# udev cached at add time.
-ACTION=="remove", SUBSYSTEM=="hidraw", ENV{ID_VENDOR_ID}=="262a", ENV{ID_MODEL_ID}=="187e", \
-    TAG+="systemd", \
-    ENV{SYSTEMD_USER_WANTS}+="dc03-forget@%k.service"

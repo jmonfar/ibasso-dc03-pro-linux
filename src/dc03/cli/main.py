@@ -276,7 +276,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "restore", help="replay stored settings to the device (udev-fired)"
     )
     sub.add_parser(
-        "forget", help="clear the stored device path (udev-fired)"
+        "forget", help="manually clear the stored device path"
     )
 
     return parser
