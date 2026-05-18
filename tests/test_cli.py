@@ -583,3 +583,145 @@ def test_uninstall_system_cleans_up_legacy_units(isolated, monkeypatch):
     # Best-effort disable was attempted.
     assert ["systemctl", "--user", "disable", "dc03-resume.service"] in calls
     assert ["systemctl", "--user", "disable", "dc03-forget@.service"] in calls
+
+
+# ---- --read / --unset for control commands ----
+
+
+def test_filter_read_returns_canonical_name(isolated, capsys):
+    save_general(GeneralSettings(filter=4))  # NOS
+
+    assert main(["filter", "--read"]) == 0
+    assert capsys.readouterr().out.strip() == "nos"
+
+
+def test_filter_read_empty_when_unset(isolated, capsys):
+    assert main(["filter", "--read"]) == 0
+    assert capsys.readouterr().out.strip() == ""
+
+
+def test_filter_unset_clears_value(isolated):
+    save_general(GeneralSettings(filter=4))
+
+    assert main(["filter", "--unset"]) == 0
+    loaded = load_general()
+    assert loaded is None or loaded.filter is None
+
+
+def test_filter_unset_preserves_other_general_fields(isolated):
+    save_general(GeneralSettings(filter=3, gain=2, output=1))
+
+    main(["filter", "--unset"])
+
+    loaded = load_general()
+    assert loaded is not None
+    assert loaded.filter is None
+    assert loaded.gain == 2
+    assert loaded.output == 1
+
+
+def test_unset_last_remaining_general_field_removes_file(isolated):
+    """Clearing the last set field deletes general.toml entirely."""
+    save_general(GeneralSettings(filter=3))
+    main(["filter", "--unset"])
+    assert load_general() is None
+
+
+def test_filter_value_and_read_mutually_exclusive(isolated, capsys):
+    assert main(["filter", "nos", "--read"]) == 1
+    assert "only one of" in capsys.readouterr().err
+
+
+def test_filter_no_action_fails_with_clear_message(isolated, capsys):
+    assert main(["filter"]) == 1
+    assert "requires" in capsys.readouterr().err
+
+
+def test_filter_unset_when_already_unset_is_idempotent(isolated, capsys):
+    assert main(["filter", "--unset"]) == 0
+    assert "not set" in capsys.readouterr().out.lower()
+
+
+def test_gain_read_returns_canonical_name(isolated, capsys):
+    save_general(GeneralSettings(gain=2))  # HIGH
+    main(["gain", "--read"])
+    assert capsys.readouterr().out.strip() == "high"
+
+
+def test_output_read_returns_canonical_name(isolated, capsys):
+    save_general(GeneralSettings(output=1))  # POWER_SAVING
+    main(["output", "--read"])
+    assert capsys.readouterr().out.strip() == "power-saving"
+
+
+def test_volume_read_returns_stored_volume(isolated, capsys):
+    save_volume(VolumeSettings(volume=60))
+    main(["volume", "--read"])
+    assert capsys.readouterr().out.strip() == "60"
+
+
+def test_volume_read_empty_when_unset(isolated, capsys):
+    main(["volume", "--read"])
+    assert capsys.readouterr().out.strip() == ""
+
+
+def test_volume_unset_flag_not_supported(isolated):
+    """volume has no --unset flag — argparse must reject it outright."""
+    with pytest.raises(SystemExit) as exc:
+        main(["volume", "--unset"])
+    assert exc.value.code == 2
+
+
+def test_balance_read_returns_value(isolated, capsys):
+    save_volume(VolumeSettings(volume=50, balance=20))
+    main(["balance", "--read"])
+    assert capsys.readouterr().out.strip() == "20"
+
+
+def test_balance_read_empty_when_unset(isolated, capsys):
+    save_volume(VolumeSettings(volume=50))  # balance defaults to None
+    main(["balance", "--read"])
+    assert capsys.readouterr().out.strip() == ""
+
+
+def test_balance_unset_preserves_volume(isolated):
+    save_volume(VolumeSettings(volume=70, balance=15))
+    main(["balance", "--unset"])
+
+    vol = load_volume()
+    assert vol is not None
+    assert vol.volume == 70
+    assert vol.balance is None
+
+
+def test_read_does_not_require_a_device(isolated, capsys):
+    """--read operates purely on config; no device or --device flag needed."""
+    save_general(GeneralSettings(filter=2))  # SHORT_DELAY_FAST
+
+    assert main(["filter", "--read"]) == 0
+    assert capsys.readouterr().out.strip() == "short-delay-fast"
+
+
+def test_unset_does_not_require_a_device(isolated):
+    """--unset operates purely on config; no device or --device flag needed."""
+    save_general(GeneralSettings(filter=2))
+
+    assert main(["filter", "--unset"]) == 0
+    assert load_general() is None
+
+
+def test_read_round_trips_through_set(isolated, capsys, monkeypatch):
+    """`dc03 filter "$(dc03 filter --read)"` is a clean no-op when set."""
+    tmp_path, _ = isolated
+    dev = _make_valid_hidraw(tmp_path)
+
+    assert main(["--device", str(dev), "filter", "nos"]) == 0
+    capsys.readouterr()  # drain
+
+    assert main(["filter", "--read"]) == 0
+    out = capsys.readouterr().out.strip()
+    assert out == "nos"
+
+    # The output is a valid input to the set command.
+    capsys.readouterr()
+    assert main(["--device", str(dev), "filter", out]) == 0

@@ -20,6 +20,14 @@ A single CLI binary, `dc03`, with subcommands. No long-running process.
 - `dc03 forget` — clear the recorded device path. Manual cleanup only;
   see Disconnect handling for why we don't run it automatically.
 
+Each per-control command (`volume`, `filter`, `gain`, `output`, `balance`)
+takes either a value (set mode), `--read` (print the current persisted
+value), or `--unset` (clear the setting from config; not available on
+`volume` since the watcher keeps it populated). `--read` and `--unset`
+operate purely on the config files and don't touch the device — useful
+for status scripts and for the contributed GUI front-end. See
+`CHANGELOG.md` v0.2 for details.
+
 There is **no** separate daemon module. The "udev-triggered settings replay"
 function originally pencilled in as `src/dc03/daemon/` is just the `restore`
 subcommand of the CLI — it runs for ~300 ms and exits.

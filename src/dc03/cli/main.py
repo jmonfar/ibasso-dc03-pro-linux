@@ -21,7 +21,6 @@ from dc03.core.config import (
     load_general,
     load_general_or_default,
     load_volume,
-    load_volume_or_default,
     resolve_device_path,
     save_device,
     save_general,
@@ -60,6 +59,30 @@ _OUTPUT_NAMES = {
     "power-saving": protocol.OUTPUT_POWER_SAVING,
     "power": protocol.OUTPUT_POWER_SAVING,
     "ps": protocol.OUTPUT_POWER_SAVING,
+}
+
+
+# Reverse-lookup canonical names for `--read` output. We deliberately pick
+# one canonical kebab-case name per value (the verbose form) so callers
+# can round-trip with the corresponding set command without ambiguity:
+#   $ dc03 filter "$(dc03 filter --read)"   # no-op when set, error if unset
+_FILTER_NAME_BY_VALUE = {
+    protocol.FILTER_FAST_ROLLOFF: "fast-rolloff",
+    protocol.FILTER_SLOW_ROLLOFF: "slow-rolloff",
+    protocol.FILTER_SHORT_DELAY_FAST: "short-delay-fast",
+    protocol.FILTER_SHORT_DELAY_SLOW: "short-delay-slow",
+    protocol.FILTER_NOS: "nos",
+}
+
+_GAIN_NAME_BY_VALUE = {
+    protocol.GAIN_LOW: "low",
+    protocol.GAIN_MEDIUM: "medium",
+    protocol.GAIN_HIGH: "high",
+}
+
+_OUTPUT_NAME_BY_VALUE = {
+    protocol.OUTPUT_NORMAL: "normal",
+    protocol.OUTPUT_POWER_SAVING: "power-saving",
 }
 
 
@@ -127,26 +150,85 @@ def _balance_arg(s: str) -> int:
     return n
 
 
+# ---- mutex helper for control commands ----
+
+
+def _validate_control_mutex(
+    args: argparse.Namespace, label: str, *, with_unset: bool = True
+) -> None:
+    """Exactly one of VALUE / --read / --unset must be specified."""
+    value_set = getattr(args, "value", None) is not None
+    read_set = getattr(args, "read", False)
+    unset_set = getattr(args, "unset", False) if with_unset else False
+
+    count = int(value_set) + int(read_set) + int(unset_set)
+    options = "VALUE, --read" + (", --unset" if with_unset else "")
+    if count > 1:
+        raise CliUsageError(f"{label}: specify only one of {options}")
+    if count == 0:
+        raise CliUsageError(f"{label}: requires one of {options}")
+
+
 # ---- Subcommand implementations ----
+#
+# Each control command (volume/filter/gain/output/balance) supports three
+# modes:
+#   - VALUE        : set the control on the device and persist to config.
+#   - --read       : print the current persisted value (empty line if unset).
+#   - --unset      : clear the setting from config. Volume has no --unset.
+#
+# Device resolution happens lazily — only the set mode actually talks to
+# the hardware. --read and --unset operate purely on the config files,
+# which lets a GUI front-end query state even when the device is unplugged.
 
 
-def _cmd_volume(args: argparse.Namespace, device: Path) -> None:
+def _cmd_volume(args: argparse.Namespace) -> None:
+    _validate_control_mutex(args, "volume", with_unset=False)
+
+    if args.read:
+        vol = load_volume()
+        if vol is not None:
+            print(vol.volume)
+        return
+
+    # Set mode
+    device = resolve_device_path(args.device)
     existing = load_volume()
     stored_balance = existing.balance if existing is not None else None
     balance_for_send = stored_balance if stored_balance is not None else 0
-    reports = protocol.volume_reports(args.level, balance=balance_for_send)
+    reports = protocol.volume_reports(args.value, balance=balance_for_send)
     send_batch(device, reports)
     save_volume(
         VolumeSettings(
-            volume=args.level,
+            volume=args.value,
             balance=stored_balance,
             updated_at=datetime.now(timezone.utc),
         )
     )
-    print(f"Volume {args.level} applied")
+    print(f"Volume {args.value} applied")
 
 
-def _cmd_filter(args: argparse.Namespace, device: Path) -> None:
+def _cmd_filter(args: argparse.Namespace) -> None:
+    _validate_control_mutex(args, "filter")
+
+    if args.read:
+        general = load_general()
+        if general is not None and general.filter is not None:
+            print(_FILTER_NAME_BY_VALUE[general.filter])
+        return
+
+    if args.unset:
+        general = load_general()
+        if general is not None and general.filter is not None:
+            general.filter = None
+            save_general(general)
+            print("Filter cleared from config")
+        else:
+            print("Filter was not set")
+        return
+
+    # Set mode
+    device = resolve_device_path(args.device)
     reports = protocol.digital_filter_reports(args.value)
     send_batch(device, reports)
     general = load_general_or_default()
@@ -155,7 +237,26 @@ def _cmd_filter(args: argparse.Namespace, device: Path) -> None:
     print(f"Filter {args.value} applied")
 
 
-def _cmd_gain(args: argparse.Namespace, device: Path) -> None:
+def _cmd_gain(args: argparse.Namespace) -> None:
+    _validate_control_mutex(args, "gain")
+
+    if args.read:
+        general = load_general()
+        if general is not None and general.gain is not None:
+            print(_GAIN_NAME_BY_VALUE[general.gain])
+        return
+
+    if args.unset:
+        general = load_general()
+        if general is not None and general.gain is not None:
+            general.gain = None
+            save_general(general)
+            print("Gain cleared from config")
+        else:
+            print("Gain was not set")
+        return
+
+    device = resolve_device_path(args.device)
     reports = protocol.gain_reports(args.value)
     send_batch(device, reports)
     general = load_general_or_default()
@@ -164,7 +265,26 @@ def _cmd_gain(args: argparse.Namespace, device: Path) -> None:
     print(f"Gain {args.value} applied")
 
 
-def _cmd_output(args: argparse.Namespace, device: Path) -> None:
+def _cmd_output(args: argparse.Namespace) -> None:
+    _validate_control_mutex(args, "output")
+
+    if args.read:
+        general = load_general()
+        if general is not None and general.output is not None:
+            print(_OUTPUT_NAME_BY_VALUE[general.output])
+        return
+
+    if args.unset:
+        general = load_general()
+        if general is not None and general.output is not None:
+            general.output = None
+            save_general(general)
+            print("Output cleared from config")
+        else:
+            print("Output was not set")
+        return
+
+    device = resolve_device_path(args.device)
     reports = protocol.output_reports(args.value)
     send_batch(device, reports)
     general = load_general_or_default()
@@ -173,10 +293,29 @@ def _cmd_output(args: argparse.Namespace, device: Path) -> None:
     print(f"Output {args.value} applied")
 
 
-def _cmd_balance(args: argparse.Namespace, device: Path) -> None:
-    # Changing balance requires re-sending the full volume transaction, which
-    # forces us to pick *some* volume value. Without a stored volume we'd be
-    # silently writing our default to NVRAM — bail out instead.
+def _cmd_balance(args: argparse.Namespace) -> None:
+    _validate_control_mutex(args, "balance")
+
+    if args.read:
+        vol = load_volume()
+        if vol is not None and vol.balance is not None:
+            print(vol.balance)
+        return
+
+    if args.unset:
+        vol = load_volume()
+        if vol is not None and vol.balance is not None:
+            vol.balance = None
+            save_volume(vol)
+            print("Balance cleared from config")
+        else:
+            print("Balance was not set")
+        return
+
+    # Set mode — changing balance requires re-sending the full volume
+    # transaction, which forces us to pick *some* volume value. Without a
+    # stored volume we'd be silently writing our default to NVRAM.
+    device = resolve_device_path(args.device)
     vol = load_volume()
     if vol is None:
         raise CliUsageError(
@@ -195,10 +334,11 @@ def _cmd_balance(args: argparse.Namespace, device: Path) -> None:
     print(f"Balance {args.value} applied")
 
 
-def _cmd_restore(args: argparse.Namespace, device: Path) -> None:
+def _cmd_restore(args: argparse.Namespace) -> None:
     # When invoked by udev with --device, refresh device.toml with the path
-    # and a timestamp. When invoked without (e.g. dc03-resume.service or by
-    # the user manually), device.toml is already current — leave it alone.
+    # and a timestamp. When invoked without (e.g. by the user manually),
+    # device.toml is already current — leave it alone.
+    device = resolve_device_path(args.device)
     if args.device is not None:
         save_device(
             DeviceRecord(
@@ -319,7 +459,6 @@ def _cmd_uninstall_system(_args: argparse.Namespace) -> None:
 
     user_systemd = _user_systemd_dir()
 
-    # Best-effort disable of legacy units from older installs.
     print("==> Disabling legacy units if present...")
     for legacy in _LEGACY_USER_UNITS:
         subprocess.run(
@@ -350,7 +489,7 @@ def _cmd_uninstall_system(_args: argparse.Namespace) -> None:
     )
 
 
-def _cmd_watch(_args: argparse.Namespace, device: Path) -> None:
+def _cmd_watch(args: argparse.Namespace) -> None:
     """Long-running watcher: sync hardware-button events into volume.toml.
 
     Each `fe 01` input report carries the current L attenuation register in
@@ -368,6 +507,7 @@ def _cmd_watch(_args: argparse.Namespace, device: Path) -> None:
     Exits cleanly when the device is disconnected (`EIO` / `ENODEV` on
     read), or at EOF when reading from a regular file (used by tests).
     """
+    device = resolve_device_path(args.device)
     print(f"Watching {device} for button events...", flush=True)
     fd = os.open(str(device), os.O_RDONLY)
     try:
@@ -419,6 +559,33 @@ def _cmd_watch(_args: argparse.Namespace, device: Path) -> None:
 # ---- Parser & entry point ----
 
 
+def _add_control_args(
+    parser: argparse.ArgumentParser,
+    value_type,
+    value_help: str,
+    *,
+    with_unset: bool = True,
+) -> None:
+    """Wire VALUE / --read / --unset onto a control subparser."""
+    parser.add_argument(
+        "value",
+        type=value_type,
+        nargs="?",
+        help=value_help,
+    )
+    parser.add_argument(
+        "--read",
+        action="store_true",
+        help="print current value to stdout (empty line if unset)",
+    )
+    if with_unset:
+        parser.add_argument(
+            "--unset",
+            action="store_true",
+            help="clear this setting from config",
+        )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dc03",
@@ -430,31 +597,35 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_vol = sub.add_parser("volume", help="set volume (0..100)")
-    p_vol.add_argument("level", type=_volume_arg, help="0..100")
+    p_vol = sub.add_parser("volume", help="set or read volume (0..100)")
+    _add_control_args(p_vol, _volume_arg, "0..100", with_unset=False)
 
-    p_filter = sub.add_parser("filter", help="set digital filter")
-    p_filter.add_argument(
-        "value",
-        type=_filter_arg,
-        help="0..4 or one of: fast-rolloff, slow-rolloff, "
+    p_filter = sub.add_parser(
+        "filter", help="set / read / unset digital filter"
+    )
+    _add_control_args(
+        p_filter,
+        _filter_arg,
+        "0..4 or one of: fast-rolloff, slow-rolloff, "
         "short-delay-fast, short-delay-slow, nos",
     )
 
-    p_gain = sub.add_parser("gain", help="set gain level")
-    p_gain.add_argument(
-        "value", type=_gain_arg, help="0..2 or one of: low, medium, high"
+    p_gain = sub.add_parser("gain", help="set / read / unset gain level")
+    _add_control_args(
+        p_gain, _gain_arg, "0..2 or one of: low, medium, high"
     )
 
-    p_output = sub.add_parser("output", help="set output mode")
-    p_output.add_argument(
-        "value",
-        type=_output_arg,
-        help="0..1 or one of: normal, power-saving",
+    p_output = sub.add_parser(
+        "output", help="set / read / unset output mode"
+    )
+    _add_control_args(
+        p_output, _output_arg, "0..1 or one of: normal, power-saving"
     )
 
-    p_balance = sub.add_parser("balance", help="set L/R balance (-50..50)")
-    p_balance.add_argument("value", type=_balance_arg, help="-50..50")
+    p_balance = sub.add_parser(
+        "balance", help="set / read / unset L/R balance (-50..50)"
+    )
+    _add_control_args(p_balance, _balance_arg, "-50..50")
 
     sub.add_parser(
         "restore", help="replay stored settings to the device (udev-fired)"
@@ -479,32 +650,26 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+_DISPATCH = {
+    "volume": _cmd_volume,
+    "filter": _cmd_filter,
+    "gain": _cmd_gain,
+    "output": _cmd_output,
+    "balance": _cmd_balance,
+    "restore": _cmd_restore,
+    "watch": _cmd_watch,
+    "forget": _cmd_forget,
+    "install-system": _cmd_install_system,
+    "uninstall-system": _cmd_uninstall_system,
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
     try:
-        no_device_cmds = {
-            "forget": _cmd_forget,
-            "install-system": _cmd_install_system,
-            "uninstall-system": _cmd_uninstall_system,
-        }
-        if args.command in no_device_cmds:
-            no_device_cmds[args.command](args)
-            return 0
-
-        device = resolve_device_path(args.device)
-
-        dispatch = {
-            "volume": _cmd_volume,
-            "filter": _cmd_filter,
-            "gain": _cmd_gain,
-            "output": _cmd_output,
-            "balance": _cmd_balance,
-            "restore": _cmd_restore,
-            "watch": _cmd_watch,
-        }
-        dispatch[args.command](args, device)
+        _DISPATCH[args.command](args)
         return 0
     except (DeviceNotFoundError, CliUsageError) as e:
         print(f"dc03: {e}", file=sys.stderr)

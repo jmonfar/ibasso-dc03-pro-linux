@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.2 — unreleased
+
+CLI primitives for reading and clearing individual settings, enabling
+cleaner status scripts and a forthcoming Tkinter GUI front-end.
+
+### Added
+
+- **`--read` flag** on `volume`, `filter`, `gain`, `output`, and `balance`
+  subcommands. Prints the current persisted value to stdout (canonical
+  name for filter/gain/output, integer for volume/balance), or an empty
+  line when the setting is unset. Exit code 0 in both cases. Reads from
+  config only — no device required, no hardware contact.
+
+- **`--unset` flag** on `filter`, `gain`, `output`, and `balance`. Clears
+  the corresponding key from config (`general.toml` or `volume.toml`).
+  When the last field in a file is unset, the file is removed entirely
+  so `load_general()` / `load_volume()` return `None` again (matching
+  "user has never set anything" semantics). Idempotent: unsetting an
+  already-unset field succeeds with a "was not set" message.
+
+  `volume` has no `--unset`: the watcher keeps it populated whenever the
+  device is connected, so unsetting it is meaningless.
+
+### Changed
+
+- Device resolution is now lazy in the control subcommands. `--read` and
+  `--unset` never touch hardware, so they work when the device is
+  disconnected — useful for status scripts and GUI initialisation.
+- The CLI dispatch table was flattened: every subcommand handler takes
+  only `args` and resolves the device internally when needed. No
+  behaviour change for set/restore/watch.
+
+### Internal
+
+- `save_general()` now deletes `general.toml` when all fields are `None`
+  (was previously a silent no-op). This matches the new "unset" path: a
+  field cleared via `--unset` removes its line from the file; clearing
+  the last field removes the file itself.
+
 ## v0.1 — 2026-05-15
 
 First tagged release. Feature-complete CLI controller for the iBasso

@@ -105,13 +105,20 @@ def test_load_general_keeps_unset_fields_none(isolated):
     assert loaded.output is None
 
 
-def test_save_general_with_all_none_is_noop(isolated):
-    """Empty record doesn't write a file; existing file isn't disturbed."""
+def test_save_general_with_all_none_deletes_file(isolated):
+    """All fields unset: the file is removed so load_general() returns None."""
     save_general(GeneralSettings(filter=3))
     assert general_path().exists()
     save_general(GeneralSettings())  # all None
-    # Existing file untouched.
-    assert load_general() == GeneralSettings(filter=3)
+    assert not general_path().exists()
+    assert load_general() is None
+
+
+def test_save_general_with_all_none_when_no_file_is_noop(isolated):
+    """No file exists, all-None save: nothing happens, no error raised."""
+    assert not general_path().exists()
+    save_general(GeneralSettings())  # all None
+    assert not general_path().exists()
 
 
 def test_incrementally_setting_fields_accumulates(isolated):

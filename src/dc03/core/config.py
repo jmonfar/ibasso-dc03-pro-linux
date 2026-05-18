@@ -151,9 +151,15 @@ def load_general_or_default() -> GeneralSettings:
 def save_general(settings: GeneralSettings) -> None:
     """Write only the fields that are not None.
 
-    A `GeneralSettings()` with everything None is a no-op (no file is
-    written, no existing file is touched). Saving a record with one field
-    set produces a file containing only that key.
+    If all fields are None, the file is deleted (if it existed) so a
+    subsequent `load_general()` returns None — keeping "user has set
+    nothing" semantically distinct from "user has explicitly set values
+    that happen to be zero". This is the path the CLI's
+    `dc03 <control> --unset` and the GUI's "Keep device default" option
+    use to clear settings.
+
+    Saving a record with one field set produces a file containing only
+    that key, regardless of what was there before.
     """
     lines: list[str] = []
     if settings.filter is not None:
@@ -162,9 +168,12 @@ def save_general(settings: GeneralSettings) -> None:
         lines.append(f"gain = {settings.gain}")
     if settings.output is not None:
         lines.append(f"output = {settings.output}")
+
+    path = general_path()
     if not lines:
+        path.unlink(missing_ok=True)
         return
-    _atomic_write(general_path(), "\n".join(lines) + "\n")
+    _atomic_write(path, "\n".join(lines) + "\n")
 
 
 # ---- volume.toml ----
