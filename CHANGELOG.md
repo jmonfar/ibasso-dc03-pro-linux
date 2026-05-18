@@ -39,6 +39,16 @@ cleaner status scripts and a forthcoming Tkinter GUI front-end.
   field cleared via `--unset` removes its line from the file; clearing
   the last field removes the file itself.
 
+### Contrib
+
+- **`contrib/dc03-gui.py`** — a small Tkinter front-end for the CLI.
+  Dropdowns for filter / gain / output with a "Keep device default"
+  sentinel (mapped to `--unset`), sliders for volume and balance, Apply
+  button that fires the right `dc03` subcommand for each dirty control,
+  Refresh button that re-reads state via `dc03 <ctrl> --read`. Stdlib
+  only (tkinter); not part of the installed package; lives in `contrib/`
+  alongside `dc03-vol.sh`.
+
 ## v0.1 — 2026-05-15
 
 First tagged release. Feature-complete CLI controller for the iBasso

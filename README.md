@@ -131,8 +131,21 @@ history of why we don't ship an automatic resume hook.)
   that prints the current stored volume (e.g. `DC03pro vol 75`) or
   `DC03pro absent` if the DAC isn't plugged in. Drop into `~/bin/` and
   `chmod +x` for use with Cinnamon's CommandRunner or any other status
-  widget that polls a command. Not part of the installed package; this
-  file lives in the repo for convenience.
+  widget that polls a command.
+
+- [`contrib/dc03-gui.py`](contrib/dc03-gui.py) — a small Tkinter
+  front-end. Dropdowns for filter / gain / output (each with a "Keep
+  device default" sentinel that maps to `dc03 <ctrl> --unset`), sliders
+  for volume and balance, an Apply button that fires the right
+  `dc03` subcommands. Read-only operations (state on startup, Refresh
+  button) use `dc03 <ctrl> --read` so the GUI doesn't need to know the
+  config file layout. Run as `python3 contrib/dc03-gui.py` or just
+  `contrib/dc03-gui.py` after `chmod +x`. Needs Python's tkinter
+  module (stdlib but some Python builds omit it — see the docstring at
+  the top of the file for distro-specific install hints).
+
+Neither file is part of the installed package; they live in the repo for
+convenience.
 
 ## License
 
