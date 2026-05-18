@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2 — unreleased
+## v0.2 — 2026-05-18
 
 CLI primitives for reading and clearing individual settings, enabling
 cleaner status scripts and a forthcoming Tkinter GUI front-end.
