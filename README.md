@@ -125,6 +125,15 @@ history of why we don't ship an automatic resume hook.)
 | --- | --- | --- |
 | iBasso DC03 Pro | `0x262a` | `0x187e` |
 
+## Extras
+
+- [`contrib/dc03-vol.sh`](contrib/dc03-vol.sh) — a tiny POSIX shell script
+  that prints the current stored volume (e.g. `DC03pro vol 75`) or
+  `DC03pro absent` if the DAC isn't plugged in. Drop into `~/bin/` and
+  `chmod +x` for use with Cinnamon's CommandRunner or any other status
+  widget that polls a command. Not part of the installed package; this
+  file lives in the repo for convenience.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
