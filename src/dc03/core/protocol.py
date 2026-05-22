@@ -80,10 +80,10 @@ _GAIN_REGISTER = {
 # Output-mode values (app -> register byte)
 
 OUTPUT_NORMAL = 0
-OUTPUT_POWER_SAVING = 1
+OUTPUT_TURBO = 1
 _OUTPUT_REGISTER = {
     OUTPUT_NORMAL: 0x1C,
-    OUTPUT_POWER_SAVING: 0x1E,
+    OUTPUT_TURBO: 0x1E,
 }
 
 # Volume / balance bounds and the attenuation value meaning "silent"
@@ -221,7 +221,7 @@ def gain_reports(level: int) -> list[bytes]:
 def output_reports(mode: int) -> list[bytes]:
     """Two reports (left + right DAC) to set the output mode.
 
-    mode: OUTPUT_NORMAL (0) or OUTPUT_POWER_SAVING (1).
+    mode: OUTPUT_NORMAL (0) or OUTPUT_TURBO (1).
     """
     if mode not in _OUTPUT_REGISTER:
         raise ValueError(f"output mode must be 0 or 1, got {mode}")

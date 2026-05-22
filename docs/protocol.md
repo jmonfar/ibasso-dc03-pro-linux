@@ -194,12 +194,24 @@ Filter index meanings: 0 fast roll-off, 1 slow roll-off, 2 short delay fast,
 
 ### Output mode
 
+Two modes exposed by iBasso's Android UAC app as **Normal** (register
+`0x1C`) and **Turbo** (register `0x1E`). The exact electrical difference
+isn't documented anywhere we have access to; on tested efficient
+headphones the audible difference is subtle to imperceptible. Plausibly
+a higher output-drive mode that only matters under hard load
+(high-impedance / low-sensitivity transducers), but we haven't
+characterised it.
+
 | Field | Value |
 | --- | --- |
 | seq | 0x17 (left), 0x18 (right) |
 | address | 0x60 / 0x62 |
 | offsets | 0x0B, 0, 0, 0 |
-| value | 0x1C normal, 0x1E power-saving |
+| value | 0x1C normal, 0x1E turbo |
+
+The macOS reference project (`ibasso-dc03-pro-macos`) labelled mode 1 as
+"Power saving", which is electrically the wrong direction and conflicts
+with iBasso's own labelling — we renamed to "turbo" in v0.2.1.
 
 ## Persistence across unplug
 

@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.2.1 — 2026-05-22
+
+Two small UX fixes on the v0.2 line.
+
+### Fixed: output mode mislabelled as "power-saving"
+
+The Swift macOS reference implementation we ported from labelled the
+DC03 Pro's two output modes as "Normal" and "Power saving". iBasso's
+own Android UAC app calls them "Normal" and **Turbo** — and the Swift
+label was electrically the wrong way around (mode 1 drives stronger,
+not weaker). Renamed throughout to match iBasso's terminology.
+
+- Constant `protocol.OUTPUT_POWER_SAVING` → `OUTPUT_TURBO`. Numeric
+  value unchanged (still `1` / register byte `0x1E`).
+- CLI argument value: `dc03 output power-saving` → `dc03 output turbo`.
+  Legacy aliases (`power`, `ps`) also removed.
+- `dc03 output --read` now prints `turbo` instead of `power-saving`.
+- GUI dropdown shows `turbo` instead of `power-saving`.
+- `docs/protocol.md`: the output-mode section now uses iBasso's
+  terminology and includes an honesty note that the exact electrical
+  difference is undocumented and audibly subtle on tested setups.
+
+### Improved: control-command help surfaces accepted values
+
+Previously the only way to discover what `dc03 output` would take as
+input was to run it with a bogus value and read the error. Now:
+
+- `dc03 --help` lists the accepted values inline in each control's
+  one-line summary (e.g. `output — set / read / unset output mode
+  (normal, turbo)`).
+- `dc03 <control>` with no `VALUE` / `--read` / `--unset` reports the
+  accepted values in the error message instead of just "requires one
+  of VALUE, --read, --unset".
+- `dc03 <control> -h` already showed full per-control help; unchanged.
+
+### Compatibility
+
+- Stored values in `general.toml` are unaffected: `output = 1`
+  continues to work the same way; only the human-readable name changed.
+- Anyone using `dc03 output power-saving` in a script needs to update
+  to `dc03 output turbo`. The CLI no longer accepts the old name.
+
 ## v0.2 — 2026-05-18
 
 CLI primitives for reading and clearing individual settings, enabling

@@ -56,9 +56,7 @@ _GAIN_NAMES = {
 
 _OUTPUT_NAMES = {
     "normal": protocol.OUTPUT_NORMAL,
-    "power-saving": protocol.OUTPUT_POWER_SAVING,
-    "power": protocol.OUTPUT_POWER_SAVING,
-    "ps": protocol.OUTPUT_POWER_SAVING,
+    "turbo": protocol.OUTPUT_TURBO,
 }
 
 
@@ -82,8 +80,20 @@ _GAIN_NAME_BY_VALUE = {
 
 _OUTPUT_NAME_BY_VALUE = {
     protocol.OUTPUT_NORMAL: "normal",
-    protocol.OUTPUT_POWER_SAVING: "power-saving",
+    protocol.OUTPUT_TURBO: "turbo",
 }
+
+
+# Value-range hints used by argparse help strings and by error messages
+# when a control subcommand is invoked without VALUE / --read / --unset.
+# Kept in one place so the strings match across all entry points.
+_VOLUME_OPTIONS = "0..100"
+_BALANCE_OPTIONS = "-50..50"
+_FILTER_OPTIONS = (
+    "fast-rolloff, slow-rolloff, short-delay-fast, short-delay-slow, nos"
+)
+_GAIN_OPTIONS = "low, medium, high"
+_OUTPUT_OPTIONS = "normal, turbo"
 
 
 # ---- argparse type converters ----
@@ -154,19 +164,30 @@ def _balance_arg(s: str) -> int:
 
 
 def _validate_control_mutex(
-    args: argparse.Namespace, label: str, *, with_unset: bool = True
+    args: argparse.Namespace,
+    label: str,
+    *,
+    with_unset: bool = True,
+    value_hint: str = "",
 ) -> None:
-    """Exactly one of VALUE / --read / --unset must be specified."""
+    """Exactly one of VALUE / --read / --unset must be specified.
+
+    `value_hint` is shown next to `VALUE` in the "requires one of …" error
+    message so the user sees the accepted values without having to dig
+    through `--help`.
+    """
     value_set = getattr(args, "value", None) is not None
     read_set = getattr(args, "read", False)
     unset_set = getattr(args, "unset", False) if with_unset else False
 
     count = int(value_set) + int(read_set) + int(unset_set)
-    options = "VALUE, --read" + (", --unset" if with_unset else "")
+    value_part = f"VALUE ({value_hint})" if value_hint else "VALUE"
+    options_short = "VALUE, --read" + (", --unset" if with_unset else "")
+    options_hint = value_part + ", --read" + (", --unset" if with_unset else "")
     if count > 1:
-        raise CliUsageError(f"{label}: specify only one of {options}")
+        raise CliUsageError(f"{label}: specify only one of {options_short}")
     if count == 0:
-        raise CliUsageError(f"{label}: requires one of {options}")
+        raise CliUsageError(f"{label}: requires one of {options_hint}")
 
 
 # ---- Subcommand implementations ----
@@ -183,7 +204,9 @@ def _validate_control_mutex(
 
 
 def _cmd_volume(args: argparse.Namespace) -> None:
-    _validate_control_mutex(args, "volume", with_unset=False)
+    _validate_control_mutex(
+        args, "volume", with_unset=False, value_hint=_VOLUME_OPTIONS
+    )
 
     if args.read:
         vol = load_volume()
@@ -209,7 +232,7 @@ def _cmd_volume(args: argparse.Namespace) -> None:
 
 
 def _cmd_filter(args: argparse.Namespace) -> None:
-    _validate_control_mutex(args, "filter")
+    _validate_control_mutex(args, "filter", value_hint=_FILTER_OPTIONS)
 
     if args.read:
         general = load_general()
@@ -238,7 +261,7 @@ def _cmd_filter(args: argparse.Namespace) -> None:
 
 
 def _cmd_gain(args: argparse.Namespace) -> None:
-    _validate_control_mutex(args, "gain")
+    _validate_control_mutex(args, "gain", value_hint=_GAIN_OPTIONS)
 
     if args.read:
         general = load_general()
@@ -266,7 +289,7 @@ def _cmd_gain(args: argparse.Namespace) -> None:
 
 
 def _cmd_output(args: argparse.Namespace) -> None:
-    _validate_control_mutex(args, "output")
+    _validate_control_mutex(args, "output", value_hint=_OUTPUT_OPTIONS)
 
     if args.read:
         general = load_general()
@@ -294,7 +317,7 @@ def _cmd_output(args: argparse.Namespace) -> None:
 
 
 def _cmd_balance(args: argparse.Namespace) -> None:
-    _validate_control_mutex(args, "balance")
+    _validate_control_mutex(args, "balance", value_hint=_BALANCE_OPTIONS)
 
     if args.read:
         vol = load_volume()
@@ -597,35 +620,39 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_vol = sub.add_parser("volume", help="set or read volume (0..100)")
-    _add_control_args(p_vol, _volume_arg, "0..100", with_unset=False)
+    p_vol = sub.add_parser(
+        "volume", help=f"set / read volume ({_VOLUME_OPTIONS})"
+    )
+    _add_control_args(p_vol, _volume_arg, _VOLUME_OPTIONS, with_unset=False)
 
     p_filter = sub.add_parser(
-        "filter", help="set / read / unset digital filter"
+        "filter",
+        help=f"set / read / unset digital filter ({_FILTER_OPTIONS})",
     )
     _add_control_args(
-        p_filter,
-        _filter_arg,
-        "0..4 or one of: fast-rolloff, slow-rolloff, "
-        "short-delay-fast, short-delay-slow, nos",
+        p_filter, _filter_arg, f"0..4 or one of: {_FILTER_OPTIONS}"
     )
 
-    p_gain = sub.add_parser("gain", help="set / read / unset gain level")
+    p_gain = sub.add_parser(
+        "gain", help=f"set / read / unset gain level ({_GAIN_OPTIONS})"
+    )
     _add_control_args(
-        p_gain, _gain_arg, "0..2 or one of: low, medium, high"
+        p_gain, _gain_arg, f"0..2 or one of: {_GAIN_OPTIONS}"
     )
 
     p_output = sub.add_parser(
-        "output", help="set / read / unset output mode"
+        "output",
+        help=f"set / read / unset output mode ({_OUTPUT_OPTIONS})",
     )
     _add_control_args(
-        p_output, _output_arg, "0..1 or one of: normal, power-saving"
+        p_output, _output_arg, f"0..1 or one of: {_OUTPUT_OPTIONS}"
     )
 
     p_balance = sub.add_parser(
-        "balance", help="set / read / unset L/R balance (-50..50)"
+        "balance",
+        help=f"set / read / unset L/R balance ({_BALANCE_OPTIONS})",
     )
-    _add_control_args(p_balance, _balance_arg, "-50..50")
+    _add_control_args(p_balance, _balance_arg, _BALANCE_OPTIONS)
 
     sub.add_parser(
         "restore", help="replay stored settings to the device (udev-fired)"

@@ -9,7 +9,7 @@ software around it.
 A single CLI binary, `dc03`, with subcommands. No long-running process.
 
 - `dc03 volume <0..100>` — interactive volume change.
-- `dc03 filter <0..4>`, `dc03 gain <low|med|high>`, `dc03 output <normal|power-saving>`,
+- `dc03 filter <0..4>`, `dc03 gain <low|med|high>`, `dc03 output <normal|turbo>`,
   `dc03 balance <-50..50>` — interactive control of the rare-change settings.
 - `dc03 restore` — replay stored settings to the device. Intended to be
   invoked by udev on attach; also runnable by hand.

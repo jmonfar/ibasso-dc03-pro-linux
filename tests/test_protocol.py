@@ -82,7 +82,7 @@ def test_output_normal():
     ]
 
 
-def test_output_power_saving():
+def test_output_turbo():
     assert output_reports(1) == [
         bytes.fromhex("171188600000050b0000001e00000000"),
         bytes.fromhex("181188620000050b0000001e00000000"),

@@ -57,7 +57,7 @@ FILTER_VALUES = [
     "nos",
 ]
 GAIN_VALUES = ["low", "medium", "high"]
-OUTPUT_VALUES = ["normal", "power-saving"]
+OUTPUT_VALUES = ["normal", "turbo"]
 
 
 def keep_default_label(control: str) -> str:

@@ -126,10 +126,10 @@ def test_output_named_value_resolves(isolated):
     tmp_path, calls = isolated
     dev = _make_valid_hidraw(tmp_path)
 
-    assert main(["--device", str(dev), "output", "power-saving"]) == 0
+    assert main(["--device", str(dev), "output", "turbo"]) == 0
 
     _, reports = calls[0]
-    assert reports[0][11] == 0x1E  # OUTPUT_POWER_SAVING register value
+    assert reports[0][11] == 0x1E  # OUTPUT_TURBO register value
     assert load_general().output == 1
 
 
@@ -649,9 +649,9 @@ def test_gain_read_returns_canonical_name(isolated, capsys):
 
 
 def test_output_read_returns_canonical_name(isolated, capsys):
-    save_general(GeneralSettings(output=1))  # POWER_SAVING
+    save_general(GeneralSettings(output=1))  # TURBO
     main(["output", "--read"])
-    assert capsys.readouterr().out.strip() == "power-saving"
+    assert capsys.readouterr().out.strip() == "turbo"
 
 
 def test_volume_read_returns_stored_volume(isolated, capsys):
